@@ -1,0 +1,192 @@
+import { db } from '../../../../core/backend/db';
+import { NotFoundError } from '../../../../core/backend/errors';
+
+export interface StockLedgerRow {
+  id: number;
+  product_variant_id: number;
+  quantity_grams: number | null;
+  quantity_units: number | null;
+  safety_threshold_grams: number | null;
+  safety_threshold_units: number | null;
+  updated_at: string;
+}
+
+export interface StockStatusRow extends StockLedgerRow {
+  variant_name: string;
+  product_name: string;
+  product_code: string;
+  category: string;
+  unit_type: 'weight' | 'piece';
+}
+
+export const stockLedgerRepository = {
+  findByVariantId(productVariantId: number): StockLedgerRow | undefined {
+    return db.prepare('SELECT * FROM stock_ledger WHERE product_variant_id = ?').get(productVariantId) as StockLedgerRow | undefined;
+  },
+
+  updateStock(productVariantId: number, deltaGrams: number | null, deltaUnits: number | null): void {
+    const existing = this.findByVariantId(productVariantId);
+    if (!existing) {
+      // If not in ledger, fetch unit type to insert a default row
+      const variant = db.prepare(`
+        SELECT pv.id, p.unit_type 
+        FROM product_variants pv 
+        JOIN products p ON pv.product_id = p.id 
+        WHERE pv.id = ?
+      `).get(productVariantId) as { unit_type: 'weight' | 'piece' } | undefined;
+
+      if (!variant) {
+        throw new NotFoundError(`Product variant with id ${productVariantId} not found`);
+      }
+
+      if (variant.unit_type === 'weight') {
+        db.prepare(`
+          INSERT INTO stock_ledger (product_variant_id, quantity_grams, quantity_units, safety_threshold_grams, safety_threshold_units)
+          VALUES (?, ?, NULL, 5000, NULL)
+        `).run(productVariantId, deltaGrams ?? 0);
+      } else {
+        db.prepare(`
+          INSERT INTO stock_ledger (product_variant_id, quantity_grams, quantity_units, safety_threshold_grams, safety_threshold_units)
+          VALUES (?, NULL, ?, NULL, 10)
+        `).run(productVariantId, deltaUnits ?? 0);
+      }
+    } else {
+      if (existing.quantity_grams !== null && deltaGrams !== null) {
+        db.prepare(`
+          UPDATE stock_ledger 
+          SET quantity_grams = quantity_grams + @delta, updated_at = CURRENT_TIMESTAMP 
+          WHERE product_variant_id = @variantId
+        `).run({ delta: deltaGrams, variantId: productVariantId });
+      } else if (existing.quantity_units !== null && deltaUnits !== null) {
+        db.prepare(`
+          UPDATE stock_ledger 
+          SET quantity_units = quantity_units + @delta, updated_at = CURRENT_TIMESTAMP 
+          WHERE product_variant_id = @variantId
+        `).run({ delta: deltaUnits, variantId: productVariantId });
+      }
+    }
+  },
+
+  findAll(): StockStatusRow[] {
+    return db.prepare(`
+      SELECT sl.*, pv.variant_name, p.name as product_name, p.product_code, p.category, p.unit_type,
+             pv.cost_price_paise_per_unit, pv.current_rate_paise_per_unit, pv.last_purchase_cost, pv.weighted_average_cost,
+             (
+               SELECT unit_cost_paise 
+               FROM product_stock_batches 
+               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               ORDER BY received_date DESC, id DESC 
+               LIMIT 1
+             ) as latest_purchase_rate_paise,
+             (
+               SELECT unit_cost_paise 
+               FROM product_stock_batches 
+               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               ORDER BY received_date DESC, id DESC 
+               LIMIT 1 OFFSET 1
+             ) as previous_purchase_rate_paise
+      FROM stock_ledger sl
+      JOIN product_variants pv ON sl.product_variant_id = pv.id
+      JOIN products p ON pv.product_id = p.id
+      ORDER BY p.name ASC, pv.variant_name ASC
+    `).all() as StockStatusRow[];
+  },
+
+  getLowStock(): StockStatusRow[] {
+    return db.prepare(`
+      SELECT sl.*, pv.variant_name, p.name as product_name, p.product_code, p.category, p.unit_type,
+             pv.cost_price_paise_per_unit, pv.current_rate_paise_per_unit, pv.last_purchase_cost, pv.weighted_average_cost,
+             (
+               SELECT unit_cost_paise 
+               FROM product_stock_batches 
+               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               ORDER BY received_date DESC, id DESC 
+               LIMIT 1
+             ) as latest_purchase_rate_paise,
+             (
+               SELECT unit_cost_paise 
+               FROM product_stock_batches 
+               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               ORDER BY received_date DESC, id DESC 
+               LIMIT 1 OFFSET 1
+             ) as previous_purchase_rate_paise
+      FROM stock_ledger sl
+      JOIN product_variants pv ON sl.product_variant_id = pv.id
+      JOIN products p ON pv.product_id = p.id
+      WHERE 
+        (p.unit_type = 'weight' AND sl.quantity_grams <= sl.safety_threshold_grams) OR
+        (p.unit_type = 'piece' AND sl.quantity_units <= sl.safety_threshold_units)
+      ORDER BY p.name ASC, pv.variant_name ASC
+    `).all() as StockStatusRow[];
+  },
+
+  getMetadata(key: string): string | null {
+    try {
+      const row = db.prepare('SELECT value FROM inventory_metadata WHERE key = ?').get(key) as { value: string } | undefined;
+      return row ? row.value : null;
+    } catch {
+      return null;
+    }
+  },
+
+  setMetadata(key: string, value: string): void {
+    db.prepare(`
+      INSERT INTO inventory_metadata (key, value, updated_at)
+      VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+    `).run(key, value);
+  },
+
+  getSidebarSummary() {
+    const all = this.findAll();
+    let ok = 0;
+    let low = 0;
+    let critical = 0;
+
+    const itemsWithStatus = all.map(item => {
+      const isWeight = item.unit_type === 'weight';
+      const current = isWeight ? (item.quantity_grams ?? 0) : (item.quantity_units ?? 0);
+      const threshold = isWeight ? (item.safety_threshold_grams ?? 5000) : (item.safety_threshold_units ?? 10);
+      const ratio = threshold > 0 ? current / threshold : 1;
+
+      let status: 'ok' | 'low' | 'critical' = 'ok';
+      if (ratio <= 0.5) {
+        status = 'critical';
+        critical++;
+      } else if (ratio <= 1.0) {
+        status = 'low';
+        low++;
+      } else {
+        ok++;
+      }
+
+      return {
+        ...item,
+        currentQty: current,
+        thresholdQty: threshold,
+        ratio,
+        status,
+      };
+    });
+
+    const needsAttention = itemsWithStatus
+      .filter(i => i.status !== 'ok')
+      .sort((a, b) => a.ratio - b.ratio)
+      .slice(0, 5);
+
+    const recentMovements = db.prepare(`
+      SELECT st.*, pv.variant_name, p.name as product_name, p.unit_type
+      FROM stock_transactions st
+      JOIN product_variants pv ON st.product_variant_id = pv.id
+      JOIN products p ON pv.product_id = p.id
+      ORDER BY st.created_at DESC
+      LIMIT 5
+    `).all() as any[];
+
+    return {
+      statusCounts: { ok, low, critical, total: all.length },
+      needsAttention,
+      recentMovements,
+    };
+  }
+};

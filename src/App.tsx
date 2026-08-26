@@ -1,0 +1,2372 @@
+import { useState, useEffect, useCallback } from 'react';
+import { MemoryRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  Settings as SettingsIcon,
+  HelpCircle,
+  Database,
+  Terminal,
+  Clock,
+  Sun,
+  Moon,
+  Keyboard,
+  ShoppingCart,
+  Pause,
+  Package,
+  LayoutGrid,
+  BarChart3,
+  Phone,
+  Users,
+  Landmark,
+  Printer,
+  Search,
+  Lock,
+  Receipt,
+  TrendingUp,
+  CreditCard,
+  BookOpen,
+  Drumstick,
+  Activity,
+  Truck,
+} from 'lucide-react';
+import { IPC_CHANNELS } from './core/ipc/channels';
+import { AppConfig } from './core/shared/types';
+
+import ProductGrid from './modules/billing/frontend/components/ProductGrid';
+import ProductQuickSearch from './modules/billing/frontend/components/ProductQuickSearch';
+import Cart from './modules/billing/frontend/components/Cart';
+import WastageCalculatorWidget from './modules/billing/frontend/components/WastageCalculatorWidget';
+import WeightEntry from './modules/billing/frontend/components/WeightEntry';
+import PaymentPanel from './modules/billing/frontend/components/PaymentPanel';
+import HeldBillsList from './modules/billing/frontend/components/HeldBillsList';
+import OverrideDialog from './modules/billing/frontend/components/OverrideDialog';
+import { useLowStockAlerts, useOversoldRecords } from './modules/inventory/frontend/hooks/useInventory';
+import CustomerSearch from './modules/customers/frontend/components/CustomerSearch';
+import ReprintLookupModal from './modules/billing/frontend/components/ReprintLookupModal';
+import { useCustomer } from './modules/customers/frontend/hooks/useCustomers';
+import type { Customer } from './modules/customers/frontend/types/customer.types';
+import POSAppearanceSettings from './modules/settings/frontend/components/POSAppearanceSettings';
+import POSShortcutSettings from './modules/settings/frontend/components/POSShortcutSettings';
+import { Key, AlertTriangle, Edit3, Trash2, CheckCircle2, Palette, Zap } from 'lucide-react';
+import { useSession, useLogout } from './modules/auth/frontend/hooks/useAuth';
+import LoginScreen from './modules/auth/frontend/components/LoginScreen';
+import { useCart } from './modules/billing/frontend/hooks/useCart';
+import DailyCashierPromptModal from './modules/inventory/frontend/components/DailyCashierPromptModal';
+import { useHeldBills } from './modules/billing/frontend/hooks/useHeldBills';
+import type { ProductVariant, InvoiceDetail } from './modules/billing/frontend/types/billing.types';
+import { calculateLineTax } from './modules/billing/frontend/types/billing.types';
+import { useAppearance } from './core/theme/AppearanceContext';
+import { useMeatShopConfigStore } from './core/config/meatShopConfigStore';
+
+import InventoryView from './modules/inventory/frontend/components/InventoryView';
+import PurchasesWorkspace from './modules/inventory/frontend/components/procurement/PurchasesWorkspace';
+import ProductManagementView from './modules/products/frontend/components/ProductManagementView';
+import ReportsView from './modules/reports/frontend/components/ReportsView';
+import CustomerList from './modules/customers/frontend/components/CustomerList';
+import ARReportsView from './modules/customers/frontend/components/ARReportsView';
+import HRManagementView from './modules/hr/frontend/components/HRManagementView';
+import CashBoxView from './modules/cashbox/frontend/components/CashBoxView';
+import ExpenseManagementView from './modules/expenses/frontend/components/ExpenseManagementView';
+import DailyMarketPricesView from './modules/pricing/frontend/components/DailyMarketPricesView';
+import EnterpriseLedgerView from './modules/ledger/frontend/components/EnterpriseLedgerView';
+import SystemHealthView from './modules/system/frontend/components/SystemHealthView';
+import DemandForecastingView from './modules/inventory/frontend/components/DemandForecastingView';
+import MeatProcessingYieldView from './modules/production/frontend/components/MeatProcessingYieldView';
+import PaymentsReceiptsView from './modules/ledger/frontend/components/PaymentsReceiptsView';
+
+type Page = 'billing' | 'inventory' | 'purchases' | 'payments' | 'products' | 'reports' | 'settings' | 'help' | 'customers' | 'ar_reports' | 'hr' | 'cashbox' | 'expenses' | 'prices' | 'ledgers' | 'yield' | 'health' | 'forecasting';
+
+// ─── Sidebar ──────────────────────────────────────────────────────────────────
+function Sidebar({ activePage, onNavigate, theme, onToggleTheme }: {
+  activePage: Page;
+  onNavigate: (page: Page) => void;
+  theme: 'light' | 'dark';
+  onToggleTheme: () => void;
+}) {
+  const { data: heldBills } = useHeldBills();
+  const heldCount = (heldBills || []).filter(b => b.status === 'held').length;
+  const { data: session } = useSession();
+  const logoutMutation = useLogout();
+  const { data: lowStockAlerts } = useLowStockAlerts();
+  const lowStockBadgeCount = lowStockAlerts?.length || 0;
+  const { data: oversoldRecords } = useOversoldRecords();
+  const unreviewedOversoldCount = (oversoldRecords || []).length;
+  return (
+    <aside className="w-48 bg-surface-panel text-text-primary flex flex-col justify-between border-r border-border-subtle h-full max-h-screen flex-shrink-0 select-none overflow-hidden">
+      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto">
+        {/* Brand Header */}
+        <div className="p-3 flex items-center gap-2 border-b border-border-subtle flex-shrink-0 sticky top-0 bg-surface-panel z-10">
+          <div className="w-7 h-7 rounded-lg bg-brand-500 flex items-center justify-center font-bold text-xs text-white shadow-subtle shrink-0">
+            M
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="font-bold text-xs tracking-tight text-text-primary truncate">MEAT SHOP POS</h1>
+            <p className="text-[8.5px] text-brand-500 font-bold uppercase tracking-wider truncate">Enterprise Carbon</p>
+          </div>
+        </div>
+        {/* Navigation Items */}
+        {unreviewedOversoldCount > 0 && (
+          <div className="mx-2 mt-1.5 px-2 py-1.5 bg-rose-500/10 border border-rose-500/20 rounded-lg flex items-center gap-1.5 text-rose-500 shadow-sm cursor-pointer hover:bg-rose-500/20 transition-colors flex-shrink-0" onClick={() => onNavigate('inventory')}>
+            <AlertTriangle size={13} className="animate-pulse shrink-0" />
+            <span className="text-[9.5px] font-bold leading-tight truncate">{unreviewedOversoldCount} oversold item(s)</span>
+          </div>
+        )}
+        <nav className="p-1.5 space-y-0.5">
+          <button
+            onClick={() => onNavigate('billing')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'billing'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <ShoppingCart size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Billing / POS</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('inventory')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'inventory'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Package size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Inventory / Stock</span>
+            {lowStockBadgeCount > 0 && (
+              <span className="bg-rose-500 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full shadow-sm animate-pulse">
+                {lowStockBadgeCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => onNavigate('purchases')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'purchases'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Truck size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Purchases</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('payments')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'payments'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <CreditCard size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Payments & Receipts</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('reports')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'reports'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <BarChart3 size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Reports / Sales</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('products')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'products'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <LayoutGrid size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Products</span>
+          </button>
+
+
+          <button
+            onClick={() => onNavigate('customers')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'customers'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Users size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Customers / CRM</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('ar_reports')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'ar_reports'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Landmark size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Credit & A/R</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('hr')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'hr'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Users size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">HR & Payroll</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('cashbox')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'cashbox'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Lock size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Cash Box & Shifts</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('expenses')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'expenses'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Receipt size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Expenses</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('prices')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'prices'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <TrendingUp size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Market Rates</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('ledgers')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'ledgers'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <BookOpen size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Daily Ledgers</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('yield')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'yield'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Drumstick size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Yield Batch</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('health')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'health'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Activity size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Diagnostics</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('forecasting')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'forecasting'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <TrendingUp size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Demand Forecasting</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('settings')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'settings'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <SettingsIcon size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Settings</span>
+          </button>
+
+          <button
+            onClick={() => onNavigate('help')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'help'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <HelpCircle size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">System Help</span>
+          </button>
+        </nav>
+
+        {/* Held Bills Badge */}
+        {heldCount > 0 && (
+          <div className="mx-2 px-2 py-1.5 bg-amber-950/40 border border-amber-800/40 rounded-lg mt-1">
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold">
+              <Pause size={13} className="shrink-0" />
+              <span className="truncate">{heldCount} held bill{heldCount !== 1 ? 's' : ''}</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Sidebar Footer */}
+      <div className="p-2 border-t border-border-subtle space-y-1.5 flex-shrink-0 bg-surface-panel z-10">
+        <button
+          onClick={onToggleTheme}
+          className="w-full flex items-center justify-between px-2 py-1.5 bg-surface-card hover:bg-surface-hover rounded-lg border border-border-subtle text-[10px] font-medium text-text-secondary hover:text-text-primary transition-colors"
+        >
+          <span className="flex items-center gap-1.5 truncate">
+            {theme === 'dark' ? <Sun size={11} className="text-amber-400 shrink-0" /> : <Moon size={11} className="shrink-0" />}
+            <span className="truncate">{theme === 'dark' ? 'Dark Carbon' : 'Light Mode'}</span>
+          </span>
+          <span className="font-mono text-[8.5px] opacity-60 ml-1">Ctrl+T</span>
+        </button>
+
+        {session && (
+          <div className="flex items-center justify-between p-2 bg-surface-card rounded-lg border border-border-subtle text-[10px] font-medium transition-colors shadow-xs">
+            <div className="flex flex-col min-w-0 mr-1">
+              <span className="text-text-primary font-bold leading-tight truncate">{session.username}</span>
+              <span className="text-[8.5px] text-brand-500 font-bold uppercase tracking-wider truncate">{session.role}</span>
+            </div>
+            <button
+              onClick={() => logoutMutation.mutate()}
+              className="px-2 py-0.5 bg-red-500 border-none hover:bg-red-600 active:bg-red-700 text-white rounded text-[8.5px] font-bold uppercase transition-all shadow-sm cursor-pointer shrink-0"
+            >
+              Sign Out
+            </button>
+          </div>
+        )}
+
+        <div className="flex items-center gap-1.5 text-[9px] text-text-muted px-1">
+          <Terminal size={11} className="shrink-0" />
+          <span className="truncate">Local Engine Active</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+// ─── Statusbar ────────────────────────────────────────────────────────────────
+function Statusbar({ dbHealth, sysInfo }: { dbHealth: any; sysInfo: any }) {
+  const [time, setTime] = useState(new Date().toLocaleTimeString());
+
+  useEffect(() => {
+    const timer = setInterval(() => setTime(new Date().toLocaleTimeString()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const isConnected = dbHealth?.status === 'OK';
+
+  return (
+    <footer className="h-8 bg-surface-panel border-t border-border-subtle px-4 flex items-center justify-between text-[11px] text-text-secondary font-medium select-none flex-shrink-0">
+      <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-brand-500' : 'bg-red-500'}`} />
+          <span>Database: <strong className={isConnected ? 'text-brand-500' : 'text-red-400'}>{isConnected ? 'Connected' : 'Offline'}</strong></span>
+        </div>
+        <div>
+          <span>Migrations: <strong className="text-text-primary">{dbHealth?.appliedMigrations || 0}</strong></span>
+        </div>
+        <div className="border-l border-border-subtle pl-4">
+          <span className="uppercase text-[9px] bg-surface-card border border-border-subtle text-text-secondary px-1.5 py-0.5 rounded font-bold font-mono">
+            {sysInfo?.env || 'Loading'}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-6 mr-14">
+        <div className="hidden md:block">
+          <span>Platform: <span className="font-mono text-text-primary">{sysInfo?.platform || ''} ({sysInfo?.arch || ''})</span></span>
+        </div>
+        <div className="hidden lg:block">
+          <span>Electron: <span className="font-mono text-text-primary">{sysInfo?.electronVersion || ''}</span></span>
+        </div>
+        <div className="flex items-center gap-1.5 font-mono font-semibold text-text-primary bg-surface-card/60 px-2 py-0.5 rounded border border-border-subtle/50">
+          <Clock size={12} className="text-brand-500" />
+          <span>{time}</span>
+        </div>
+      </div>
+    </footer>
+  );
+}
+
+// ─── Billing POS View ─────────────────────────────────────────────────────────
+function BillingView() {
+  const cart = useCart();
+  const queryClient = useQueryClient();
+  const { data: session } = useSession();
+
+  const configQuery = useQuery<AppConfig>({
+    queryKey: ['config'],
+    queryFn: () => window.api.invoke(IPC_CHANNELS.CONFIG.GET).then((res: any) => {
+      if (!res.success) throw new Error(res.error.message);
+      return res.data;
+    })
+  });
+
+  const [showWeightEntry, setShowWeightEntry] = useState(false);
+  const [showPaymentPanel, setShowPaymentPanel] = useState(false);
+  const [showHeldBills, setShowHeldBills] = useState(false);
+  const [showOverrideDialog, setShowOverrideDialog] = useState(false);
+
+  const [weightEntryMeta, setWeightEntryMeta] = useState({ itemId: 0, variantName: '', ratePaise: 0, isNewItem: false, variantId: 0 });
+  const [overrideMeta] = useState({ variantId: 0, variantName: '', currentRatePaise: 0, quantityGrams: 0, quantityUnits: 0, unitType: 'weight' as 'weight' | 'piece' });
+
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [catalogSearchTerm, setCatalogSearchTerm] = useState('');
+  const [lastCompletedInvoice, setLastCompletedInvoice] = useState<InvoiceDetail | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'upi' | 'card' | 'credit' | 'split' | null>(null);
+
+
+
+  // Modals for Last Bill Edit & Void
+  const [showEditPasswordModal, setShowEditPasswordModal] = useState(false);
+  const [editPassword, setEditPassword] = useState('');
+  const [editError, setEditError] = useState('');
+
+  const [showVoidConfirmModal, setShowVoidConfirmModal] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voidError, setVoidError] = useState('');
+
+  // Reprint Modals
+  const [showReprintChoiceModal, setShowReprintChoiceModal] = useState(false);
+  const [showReprintLookupModal, setShowReprintLookupModal] = useState(false);
+
+  const customerId = cart.activeInvoice?.customer_id ?? null;
+  const { data: customer } = useCustomer(customerId);
+
+  const focusEnterBillBar = useCallback(() => {
+    const doFocus = () => {
+      const input = document.getElementById('quick-product-search-input') as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+      }
+    };
+    doFocus();
+    requestAnimationFrame(doFocus);
+    setTimeout(doFocus, 50);
+    setTimeout(doFocus, 150);
+  }, []);
+
+  // Auto-focus Enter Bill Bar on initial mount / navigation to billing
+  useEffect(() => {
+    focusEnterBillBar();
+    const t1 = setTimeout(focusEnterBillBar, 50);
+    const t2 = setTimeout(focusEnterBillBar, 200);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [focusEnterBillBar]);
+
+  // Auto-return focus to enter bill bar whenever any modal closes
+  useEffect(() => {
+    const hasAnyModal = (
+      showWeightEntry ||
+      showPaymentPanel ||
+      showHeldBills ||
+      showOverrideDialog ||
+      showEditPasswordModal ||
+      showVoidConfirmModal ||
+      showReprintChoiceModal ||
+      showReprintLookupModal
+    );
+    if (!hasAnyModal) {
+      focusEnterBillBar();
+    }
+  }, [
+    showWeightEntry,
+    showPaymentPanel,
+    showHeldBills,
+    showOverrideDialog,
+    showEditPasswordModal,
+    showVoidConfirmModal,
+    showReprintChoiceModal,
+    showReprintLookupModal,
+    focusEnterBillBar
+  ]);
+
+  // Global window click & Escape listener:
+  // If user clicks anywhere (left sidebar, right catalog, top bar, lower bar, borders, margins) on non-interactive areas,
+  // immediately focus the enter bill bar.
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      const hasOpenModal = (
+        showWeightEntry ||
+        showPaymentPanel ||
+        showHeldBills ||
+        showOverrideDialog ||
+        showEditPasswordModal ||
+        showVoidConfirmModal ||
+        showReprintChoiceModal ||
+        showReprintLookupModal
+      );
+      if (hasOpenModal) return;
+
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+
+      if (target.closest('[role="dialog"], [aria-modal="true"], .modal')) {
+        return;
+      }
+
+      const isInteractive = target.closest('input, textarea, select, button, a, label, [contenteditable="true"], [role="button"], [tabindex]:not([tabindex="-1"])');
+      if (isInteractive) {
+        return;
+      }
+
+      focusEnterBillBar();
+    };
+
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        const hasOpenModal = (
+          showWeightEntry ||
+          showPaymentPanel ||
+          showHeldBills ||
+          showOverrideDialog ||
+          showEditPasswordModal ||
+          showVoidConfirmModal ||
+          showReprintChoiceModal ||
+          showReprintLookupModal
+        );
+        if (!hasOpenModal) {
+          setSelectedVariant(null);
+          setSearchTerm('');
+          focusEnterBillBar();
+        }
+      }
+    };
+
+    window.addEventListener('click', handleGlobalClick);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('click', handleGlobalClick);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [
+    showWeightEntry,
+    showPaymentPanel,
+    showHeldBills,
+    showOverrideDialog,
+    showEditPasswordModal,
+    showVoidConfirmModal,
+    showReprintChoiceModal,
+    showReprintLookupModal,
+    focusEnterBillBar
+  ]);
+
+  const handleCustomerChange = async (cust: Customer | null) => {
+    try {
+      await cart.linkCustomer(cust ? cust.id : null);
+      setTimeout(focusEnterBillBar, 50);
+    } catch (err: any) {
+      console.error('Customer link error:', err);
+    }
+  };
+
+  const handlePrintLastReceipt = async () => {
+    if (!lastCompletedInvoice) return;
+    try {
+      await window.api.invoke('billing:print-receipt', { invoice_id: lastCompletedInvoice.invoice.id });
+    } catch (err: any) {
+      console.error('Printing failed:', err);
+    } finally {
+      setTimeout(focusEnterBillBar, 50);
+    }
+  };
+
+  const handlePrintReceiptById = async (invoiceId: number) => {
+    try {
+      await window.api.invoke('billing:print-receipt', { invoice_id: invoiceId });
+    } catch (err: any) {
+      console.error('Printing failed:', err);
+    } finally {
+      setTimeout(focusEnterBillBar, 50);
+    }
+  };
+
+  const handleReprintClick = () => {
+    if (lastCompletedInvoice) {
+      setShowReprintChoiceModal(true);
+    } else {
+      setShowReprintLookupModal(true);
+    }
+  };
+
+  const handleAddProduct = async (variant: ProductVariant, quantityGrams: number | null, quantityUnits: number | null) => {
+    if (!cart.activeInvoiceId) {
+      await cart.createDraft();
+    }
+    await cart.addItem({ product_variant_id: variant.id, quantity_grams: quantityGrams, quantity_units: quantityUnits });
+    setTimeout(focusEnterBillBar, 50);
+  };
+
+  const handleWeightConfirm = async (grams: number) => {
+    await cart.updateItemQuantity(weightEntryMeta.itemId, grams, null);
+    setShowWeightEntry(false);
+    setTimeout(focusEnterBillBar, 50);
+  };
+
+  const handleOpenWeightEntry = (itemId: number, variantName: string, ratePaise: number) => {
+    setWeightEntryMeta({ itemId, variantName, ratePaise, isNewItem: false, variantId: 0 });
+    setShowWeightEntry(true);
+  };
+
+  const handleOverrideConfirm = async (newRatePaise: number, reason: string) => {
+    await cart.addItem({
+      product_variant_id: overrideMeta.variantId,
+      quantity_grams: overrideMeta.unitType === 'weight' ? overrideMeta.quantityGrams : null,
+      quantity_units: overrideMeta.unitType === 'piece' ? overrideMeta.quantityUnits : null,
+      override_rate_paise: newRatePaise,
+      override_reason: reason,
+      overridden_by: 1,
+    });
+    setShowOverrideDialog(false);
+    setTimeout(focusEnterBillBar, 50);
+  };
+
+  const handleResume = async (invoiceId: number) => {
+    await cart.resumeInvoice(invoiceId);
+    setShowHeldBills(false);
+    queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
+    setTimeout(focusEnterBillBar, 50);
+  };
+
+  const handleRecordPayment = async (method: 'cash' | 'upi' | 'card' | 'credit' | 'split', amountPaise: number, referenceNumber?: string | null) => {
+    if (method !== 'credit') {
+      await cart.recordPayment(method as any, amountPaise, referenceNumber);
+    }
+  };
+
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  const handleSaleComplete = (invoice: InvoiceDetail) => {
+    // 1. Instant Synchronous UI State Reset (0ms)
+    setLastCompletedInvoice(invoice);
+    setShowPaymentPanel(false);
+    setSelectedVariant(null);
+    setSearchTerm('');
+    setCatalogSearchTerm('');
+
+    const invNo = invoice.invoice.invoice_number ? `#${invoice.invoice.invoice_number.split('_')[0]}` : `#${invoice.invoice.id}`;
+    setToastMessage(`Bill ${invNo} completed`);
+    setTimeout(() => setToastMessage(null), 1500);
+
+    // 2. Immediate Direct DOM Focus on the search input
+    focusEnterBillBar();
+    const directInput = document.getElementById('quick-product-search-input') as HTMLInputElement | null;
+    if (directInput) {
+      directInput.value = '';
+      directInput.focus();
+    }
+
+    // 3. Background Asynchronous Printing (zero UI blocking)
+    window.api.invoke('billing:print-receipt', { invoice_id: invoice.invoice.id }).catch(e => {
+      console.warn('Background receipt print warning:', e);
+    });
+
+    // 4. Background Fresh Draft Initialization & Cache Invalidation
+    cart.createDraft().then(() => {
+      focusEnterBillBar();
+    }).catch(console.error);
+
+    queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
+
+    // 5. Continuous Focus Settling
+    requestAnimationFrame(focusEnterBillBar);
+    setTimeout(focusEnterBillBar, 20);
+    setTimeout(focusEnterBillBar, 80);
+  };
+
+  const handleComplete = async () => {
+    const result = await cart.completeInvoice();
+    setShowPaymentPanel(false);
+    if (result) {
+      handleSaleComplete(result);
+    }
+  };
+
+  const handleEditBillConfirm = async () => {
+    if (!lastCompletedInvoice) return;
+    setEditError('');
+    try {
+      const usernameToVerify = session?.username || 'admin';
+      const loginRes = await window.api.invoke('auth:login', { username: usernameToVerify, password: editPassword });
+      if (!loginRes.success) {
+        setEditError('Invalid password. Edit authorization failed.');
+        return;
+      }
+      const reopenRes = await window.api.invoke('billing:reopen-invoice', { invoice_id: lastCompletedInvoice.invoice.id });
+      if (reopenRes.success) {
+        setShowEditPasswordModal(false);
+        setEditPassword('');
+        await cart.loadInvoice(lastCompletedInvoice.invoice.id);
+        queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
+        setTimeout(focusEnterBillBar, 50);
+      } else {
+        setEditError(reopenRes.error?.message || 'Failed to reopen invoice for editing');
+      }
+    } catch (err: any) {
+      setEditError(err.message || 'Authorization failed');
+    }
+  };
+
+  const handleVoidBillConfirm = async () => {
+    if (!lastCompletedInvoice) return;
+    setVoidError('');
+    try {
+      const res = await window.api.invoke('billing:void-invoice', {
+        invoice_id: lastCompletedInvoice.invoice.id,
+        void_reason: voidReason.trim() || 'Customer requested void / cancellation',
+      });
+      if (res.success) {
+        setShowVoidConfirmModal(false);
+        setVoidReason('');
+        setLastCompletedInvoice((prev: InvoiceDetail | null) => prev ? {
+          ...prev,
+          invoice: { ...prev.invoice, status: 'void' }
+        } : null);
+        queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
+        setTimeout(focusEnterBillBar, 50);
+      } else {
+        setVoidError(res.error?.message || 'Failed to void invoice');
+      }
+    } catch (err: any) {
+      setVoidError(err.message || 'Void operation failed');
+    }
+  };
+
+  const subtotalPaise = cart.items.reduce((s, i) => s + i.line_subtotal_paise, 0);
+  const taxPaise = cart.items.reduce((s, i) => s + calculateLineTax(i.line_subtotal_paise, i.gst_rate_percent_snapshot), 0);
+  const totalPaise = subtotalPaise + taxPaise;
+
+  const handleBillingContainerClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    const isInteractive = target.closest('input, textarea, select, button, a, label, [contenteditable="true"], [role="button"], [tabindex]:not([tabindex="-1"])');
+    if (!isInteractive) {
+      focusEnterBillBar();
+    }
+  };
+
+  return (
+    <div className="flex h-full overflow-hidden bg-surface-app text-text-primary relative" onClick={handleBillingContainerClick}>
+      {/* Auto-dismissing Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[9999] bg-emerald-600 border-2 border-emerald-400 text-white font-black text-sm px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in zoom-in-95 duration-200">
+          <CheckCircle2 size={20} className="text-white animate-bounce" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+      {/* Center Column: Link Customer (Top) + Product Quick Search (Second) + Cart Page (Main) */}
+      <div className="flex-1 flex flex-col min-w-0 border-r border-border-subtle bg-surface-app overflow-hidden">
+        {/* 1. Link Customer Account Bar (Top) */}
+        <div className="px-3.5 py-2 border-b border-border-subtle bg-surface-panel flex-shrink-0">
+          <label className="block text-[9px] uppercase font-extrabold tracking-wider text-brand-500 mb-1 select-none flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-500" />
+            Link Customer Account
+          </label>
+          <CustomerSearch value={customer || null} onChange={handleCustomerChange} />
+        </div>
+
+        {/* 2. Product Quick Search & Selection */}
+        <ProductQuickSearch
+          onAddProduct={handleAddProduct}
+          selectedVariant={selectedVariant}
+          onSelectVariant={setSelectedVariant}
+          searchTerm={searchTerm}
+          onSearchTermChange={setSearchTerm}
+        />
+
+        {/* 3. Bill Sequence Cart Page */}
+        <div className="flex-1 min-h-0">
+          <Cart
+            onOpenWeightEntry={handleOpenWeightEntry}
+            onOpenPaymentPanel={() => setShowPaymentPanel(true)}
+            onCompleteSale={handleSaleComplete}
+            selectedPaymentMethod={paymentMethod}
+            onSelectPaymentMethod={setPaymentMethod}
+            skipPaymentConfirmation={configQuery.data?.billingSettings?.skipPaymentConfirmation ?? false}
+            defaultPaymentMethod={configQuery.data?.billingSettings?.defaultPaymentMethod ?? 'cash'}
+          />
+        </div>
+
+        {/* 4. Parked / Held Bills Trigger */}
+        <div className="p-3 border-t border-border-subtle bg-surface-panel flex-shrink-0">
+          <button
+            onClick={() => setShowHeldBills(true)}
+            className="btn-secondary w-full text-xs font-bold py-2"
+          >
+            View Parked / Held Bills
+          </button>
+        </div>
+      </div>
+
+      {/* Right Column: Products Catalog + Search Name Bar + Always-Visible Last Bill Status */}
+      <div className="w-[380px] lg:w-[420px] flex flex-col bg-surface-panel border-l border-border-subtle flex-shrink-0 overflow-hidden">
+        {/* Product Cards Grid with Search by Name Top Bar */}
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <ProductGrid
+            onSelectVariant={setSelectedVariant}
+            selectedVariant={selectedVariant}
+            searchTerm={catalogSearchTerm}
+            onSearchTermChange={setCatalogSearchTerm}
+          />
+        </div>
+
+        {/* Static Always-Visible Last Bill Status Panel */}
+        <div className="border-t border-border-subtle p-3 bg-surface-card/60 flex-shrink-0 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-extrabold text-text-primary">
+              <CheckCircle2 size={15} className="text-brand-500" />
+              <span>Last Bill Status</span>
+            </div>
+            {lastCompletedInvoice && (
+              <span className={`text-[9px] font-extrabold uppercase px-2 py-0.5 rounded border ${
+                lastCompletedInvoice.invoice.status === 'completed'
+                  ? 'bg-brand-500/10 border-brand-500/50 text-brand-500'
+                  : 'bg-red-950/40 border-red-800/40 text-red-400'
+              }`}>
+                {lastCompletedInvoice.invoice.status}
+              </span>
+            )}
+          </div>
+
+          {!lastCompletedInvoice ? (
+            <div className="p-3 bg-surface-panel rounded-lg border border-border-subtle text-center text-text-muted text-xs">
+              No completed bill recorded yet.
+            </div>
+          ) : (
+            <div className="bg-surface-panel border border-border-subtle rounded-xl p-3 space-y-2.5 shadow-subtle">
+              <div className="flex items-center justify-between border-b border-border-subtle/60 pb-2">
+                <span className="text-[10px] uppercase font-mono tracking-wider text-text-muted">Completed Bill</span>
+                <h4 className="text-xs font-extrabold text-brand-500 font-mono">
+                  #{lastCompletedInvoice.invoice.invoice_number?.split('_')[0] || lastCompletedInvoice.invoice.id}
+                </h4>
+              </div>
+
+              {/* Bill Metadata Grid */}
+              <div className="grid grid-cols-2 gap-2 text-[10px] bg-surface-card p-2 rounded-lg border border-border-subtle/50">
+                <div>
+                  <span className="text-text-muted block text-[8px] uppercase font-bold">Date & Time</span>
+                  <span className="font-mono text-text-primary font-semibold">
+                    {new Date(lastCompletedInvoice.invoice.created_at).toLocaleDateString()} {new Date(lastCompletedInvoice.invoice.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-text-muted block text-[8px] uppercase font-bold">Payment Mode</span>
+                  <span className="font-bold text-brand-500 uppercase font-mono">
+                    {lastCompletedInvoice.payments[0]?.method || 'CASH'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-text-muted block text-[8px] uppercase font-bold">Cashier</span>
+                  <span className="text-text-primary font-semibold">Admin</span>
+                </div>
+                <div>
+                  <span className="text-text-muted block text-[8px] uppercase font-bold">Customer</span>
+                  <span className="text-text-primary font-semibold truncate block">
+                    {lastCompletedInvoice.invoice.customer_id ? `Customer #${lastCompletedInvoice.invoice.customer_id}` : 'Walk-in'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Detailed Item List */}
+              <div className="space-y-1">
+                <span className="text-[9px] uppercase font-extrabold text-text-muted block tracking-wider">Itemized Breakdown</span>
+                <div className="border border-border-subtle rounded-lg overflow-y-auto max-h-[160px] text-[10px]">
+                  <table className="w-full text-left relative">
+                    <thead className="bg-surface-card sticky top-0 z-10 text-[8px] uppercase font-extrabold text-text-muted border-b border-border-subtle shadow-sm">
+                      <tr>
+                        <th className="px-2 py-1">Item</th>
+                        <th className="px-1.5 py-1 text-center">Qty</th>
+                        <th className="px-1.5 py-1 text-right">Rate</th>
+                        <th className="px-2 py-1 text-right">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border-subtle/50 font-mono text-[10px]">
+                      {lastCompletedInvoice.items.map(item => (
+                        <tr key={item.id} className="hover:bg-surface-hover/50">
+                          <td className="px-2 py-1 font-sans font-extrabold text-text-primary text-[10px]">
+                            {item.product_name}
+                            {item.variant_name && item.variant_name !== 'Default' && (
+                              <span className="text-[8px] font-normal text-text-muted block">({item.variant_name})</span>
+                            )}
+                          </td>
+                          <td className="px-1.5 py-1 text-center text-text-secondary font-bold">
+                            {item.quantity_grams ? `${(item.quantity_grams / 1000).toFixed(3)} kg` : `${item.quantity_units} pc`}
+                          </td>
+                          <td className="px-1.5 py-1 text-right text-text-secondary">
+                            ₹{(item.rate_paise_snapshot / 100).toFixed(2)}
+                          </td>
+                          <td className="px-2 py-1 text-right font-extrabold text-brand-500">
+                            ₹{(item.line_total_paise / 100).toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Net Amount Totals */}
+              <div className="border-t border-border-subtle pt-1.5 flex justify-between text-xs font-extrabold text-text-primary">
+                <span>Grand Total Net Amount:</span>
+                <span className="font-mono text-brand-500 text-sm">
+                  ₹{(lastCompletedInvoice.invoice.total_paise / 100).toFixed(2)}
+                </span>
+              </div>
+
+              {/* Action Buttons: Reprint, Edit (Password), Delete (Confirm) */}
+              <div className="pt-2 pb-1 border-t border-border-subtle/60 grid grid-cols-3 gap-2">
+                <button
+                  onClick={handleReprintClick}
+                  className="py-2 px-2 bg-brand-500 hover:bg-brand-600 active:scale-95 text-white rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 shadow-subtle"
+                  title="Reprint Thermal Receipt"
+                >
+                  <Printer size={13} />
+                  Reprint
+                </button>
+                <button
+                  onClick={() => {
+                    setEditPassword('');
+                    setEditError('');
+                    setShowEditPasswordModal(true);
+                  }}
+                  disabled={lastCompletedInvoice.invoice.status === 'void'}
+                  className="py-2 px-2 bg-surface-card hover:bg-amber-950/40 text-amber-400 border border-amber-800/40 active:scale-95 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 disabled:opacity-40"
+                  title="Edit Completed Bill (Requires Password)"
+                >
+                  <Edit3 size={13} />
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    setVoidReason('');
+                    setVoidError('');
+                    setShowVoidConfirmModal(true);
+                  }}
+                  disabled={lastCompletedInvoice.invoice.status === 'void'}
+                  className="py-2 px-2 bg-surface-card hover:bg-red-950/40 text-red-400 border border-red-800/40 active:scale-95 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 shadow-sm"
+                  title="Void / Delete Completed Bill (Requires Confirmation)"
+                >
+                  <Trash2 size={13} />
+                  Delete
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Edit Password Modal */}
+      {showEditPasswordModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-surface-panel border border-border-subtle rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-amber-400 border-b border-border-subtle pb-3">
+              <Key size={18} />
+              <h3 className="font-extrabold text-sm text-text-primary">Manager Password Authorization Required</h3>
+            </div>
+            <p className="text-xs text-text-muted">
+              Enter Admin/Manager password to edit completed Bill <strong className="text-brand-500">#{lastCompletedInvoice?.invoice.invoice_number?.split('_')[0] || lastCompletedInvoice?.invoice.id}</strong>. This will reopen the bill into the active cart sequence.
+            </p>
+            {editError && (
+              <div className="p-2.5 bg-red-950/40 border border-red-800/40 rounded-lg text-xs font-semibold text-red-400">
+                {editError}
+              </div>
+            )}
+            <input
+              type="password"
+              value={editPassword}
+              onChange={e => setEditPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleEditBillConfirm()}
+              placeholder="Enter password..."
+              className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-mono text-text-primary outline-none focus:border-brand-500"
+              autoFocus
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => { setShowEditPasswordModal(false); setEditPassword(''); setEditError(''); }}
+                className="btn-secondary text-xs px-4 py-2"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEditBillConfirm}
+                className="btn-primary text-xs px-4 py-2 font-bold"
+              >
+                Authorize & Edit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete / Void Confirmation Modal */}
+      {showVoidConfirmModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-surface-panel border border-red-900/40 rounded-xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-red-400 border-b border-border-subtle pb-3">
+              <AlertTriangle size={18} />
+              <h3 className="font-extrabold text-sm text-text-primary">Confirm Voiding Completed Bill</h3>
+            </div>
+            <p className="text-xs text-text-muted">
+              Are you sure you want to void/delete completed Bill <strong className="text-brand-500">#{lastCompletedInvoice?.invoice.invoice_number?.split('_')[0] || lastCompletedInvoice?.invoice.id}</strong> (Total: ₹{((lastCompletedInvoice?.invoice.total_paise ?? 0) / 100).toFixed(2)})? This will reverse stock and accounting entries.
+            </p>
+            {voidError && (
+              <div className="p-2.5 bg-red-950/40 border border-red-800/40 rounded-lg text-xs font-semibold text-red-400">
+                {voidError}
+              </div>
+            )}
+            <input
+              type="text"
+              value={voidReason}
+              onChange={e => setVoidReason(e.target.value)}
+              placeholder="Reason for voiding (optional)..."
+              className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary outline-none focus:border-brand-500"
+            />
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => { setShowVoidConfirmModal(false); setVoidReason(''); setVoidError(''); }}
+                className="btn-secondary text-xs px-4 py-2"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleVoidBillConfirm}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-all shadow-subtle"
+              >
+                Yes, Void Bill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reprint Choice Modal */}
+      {showReprintChoiceModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-surface-panel border border-border-subtle rounded-xl p-6 w-full max-w-sm shadow-2xl space-y-4 text-center">
+            <div className="w-12 h-12 rounded-full bg-brand-500/10 text-brand-500 flex items-center justify-center mx-auto">
+              <Printer size={24} />
+            </div>
+            <h3 className="font-extrabold text-base text-text-primary">Reprint Bill Option</h3>
+            <p className="text-xs text-text-muted">
+              Would you like to print the most recent completed bill or search for a past bill?
+            </p>
+
+            <div className="space-y-2 pt-2">
+              <button
+                onClick={() => {
+                  setShowReprintChoiceModal(false);
+                  handlePrintLastReceipt();
+                }}
+                className="btn-primary w-full py-2.5 text-xs font-black shadow-subtle flex items-center justify-center gap-2"
+              >
+                <Printer size={14} /> Print Last Bill ({lastCompletedInvoice?.invoice.invoice_number?.split('_')[0] || `#${lastCompletedInvoice?.invoice.id}`})
+              </button>
+              <button
+                onClick={() => {
+                  setShowReprintChoiceModal(false);
+                  setShowReprintLookupModal(true);
+                }}
+                className="btn-secondary w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2"
+              >
+                <Search size={14} /> Find Another Bill
+              </button>
+            </div>
+
+            <button
+              onClick={() => setShowReprintChoiceModal(false)}
+              className="text-[11px] text-text-muted hover:text-text-primary pt-2 block mx-auto font-semibold"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Searchable Bill Lookup Modal */}
+      {showReprintLookupModal && (
+        <ReprintLookupModal
+          onClose={() => {
+            setShowReprintLookupModal(false);
+            setTimeout(focusEnterBillBar, 50);
+          }}
+          onPrintReceipt={handlePrintReceiptById}
+        />
+      )}
+
+      {/* Modals */}
+      <WeightEntry
+        isOpen={showWeightEntry}
+        onClose={() => {
+          setShowWeightEntry(false);
+          setTimeout(focusEnterBillBar, 50);
+        }}
+        onConfirm={handleWeightConfirm}
+        variantName={weightEntryMeta.variantName}
+        ratePaise={weightEntryMeta.ratePaise}
+      />
+
+      <PaymentPanel
+        isOpen={showPaymentPanel}
+        onClose={() => {
+          setShowPaymentPanel(false);
+          setTimeout(focusEnterBillBar, 50);
+        }}
+        totalPaise={totalPaise}
+        onRecordPayment={handleRecordPayment}
+        onComplete={handleComplete}
+        paidAmount={0}
+      />
+
+      <HeldBillsList
+        isOpen={showHeldBills}
+        onClose={() => {
+          setShowHeldBills(false);
+          setTimeout(focusEnterBillBar, 50);
+        }}
+        onResume={handleResume}
+      />
+
+      <OverrideDialog
+        isOpen={showOverrideDialog}
+        onClose={() => {
+          setShowOverrideDialog(false);
+          setTimeout(focusEnterBillBar, 50);
+        }}
+        onConfirm={handleOverrideConfirm}
+        variantName={overrideMeta.variantName}
+        currentRatePaise={overrideMeta.currentRatePaise}
+      />
+
+      {(configQuery.data?.billingSettings?.enableCalculatorWidget ?? true) && (
+        <WastageCalculatorWidget />
+      )}
+    </div>
+  );
+}
+
+// ─── Settings View ────────────────────────────────────────────────────────────
+function SettingsView() {
+  const queryClient = useQueryClient();
+
+  const configQuery = useQuery<AppConfig>({
+    queryKey: ['config'],
+    queryFn: () => window.api.invoke(IPC_CHANNELS.CONFIG.GET).then((res: any) => {
+      if (!res.success) throw new Error(res.error.message);
+      return res.data;
+    })
+  });
+
+  const updateConfigMutation = useMutation({
+    mutationFn: (configPayload: any) => window.api.invoke(IPC_CHANNELS.CONFIG.UPDATE, configPayload).then((res: any) => {
+      if (!res.success) throw new Error(res.error.message);
+      return res.data;
+    }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['config'], data);
+    },
+  });
+
+  const [shopName, setShopName] = useState('');
+  const [shopAddress, setShopAddress] = useState('');
+  const [shopPhone, setShopPhone] = useState('');
+  const [shopGSTIN, setShopGSTIN] = useState('');
+
+  const [paperWidth, setPaperWidth] = useState<'58mm' | '80mm'>('80mm');
+  const [headerMessage, setHeaderMessage] = useState('Fresh Quality Meats Daily');
+  const [footerMessage, setFooterMessage] = useState('Thank you for your business! Visit again.');
+  const [showGstBreakdown, setShowGstBreakdown] = useState(true);
+  const [autoPrintOnComplete, setAutoPrintOnComplete] = useState(true);
+
+  // Fast Billing & POS Shortcuts Settings
+  const [skipPaymentConfirmation, setSkipPaymentConfirmation] = useState(false);
+  const [enableCalculatorWidget, setEnableCalculatorWidget] = useState(true);
+  const [defaultPaymentMethod, setDefaultPaymentMethod] = useState<'cash' | 'upi' | 'card' | 'split'>('cash');
+
+  useEffect(() => {
+    if (configQuery.data) {
+      setShopName(configQuery.data.shopInfo?.name || '');
+      setShopAddress(configQuery.data.shopInfo?.address || '');
+      setShopPhone(configQuery.data.shopInfo?.phone || '');
+      setShopGSTIN(configQuery.data.shopInfo?.gstin || '');
+
+      if (configQuery.data.receiptTemplate) {
+        setPaperWidth(configQuery.data.receiptTemplate.paperWidth || '80mm');
+        setHeaderMessage(configQuery.data.receiptTemplate.headerMessage || 'Fresh Quality Meats Daily');
+        setFooterMessage(configQuery.data.receiptTemplate.footerMessage || 'Thank you for your business! Visit again.');
+        setShowGstBreakdown(configQuery.data.receiptTemplate.showGstBreakdown ?? true);
+        setAutoPrintOnComplete(configQuery.data.receiptTemplate.autoPrintOnComplete ?? true);
+      }
+
+      if (configQuery.data.billingSettings) {
+        setSkipPaymentConfirmation(configQuery.data.billingSettings.skipPaymentConfirmation ?? false);
+        setEnableCalculatorWidget(configQuery.data.billingSettings.enableCalculatorWidget ?? true);
+        setDefaultPaymentMethod(configQuery.data.billingSettings.defaultPaymentMethod ?? 'cash');
+      }
+    }
+  }, [configQuery.data]);
+
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    updateConfigMutation.mutate({
+      shopInfo: {
+        name: shopName,
+        address: shopAddress,
+        phone: shopPhone,
+        gstin: shopGSTIN,
+      },
+      receiptTemplate: {
+        paperWidth,
+        headerMessage,
+        footerMessage,
+        showGstBreakdown,
+        autoPrintOnComplete,
+      },
+      billingSettings: {
+        skipPaymentConfirmation,
+        enableCalculatorWidget,
+        defaultPaymentMethod,
+      }
+    });
+  };
+
+  const handleBackup = async () => {
+    try {
+      setBackupStatus('Backing up...');
+      const res = await window.api.invoke('system:backup-database');
+      if (res.success) {
+        setBackupStatus(`Backup successfully created! Path: ${res.backupPath}`);
+      } else {
+        setBackupStatus(`Backup failed: ${res.error?.message || 'unknown error'}`);
+      }
+    } catch (err: any) {
+      setBackupStatus(`Backup failed: ${err.message}`);
+    }
+  };
+
+  const handleExport = async (type: 'invoices' | 'ledger') => {
+    try {
+      setExportStatus(`Exporting ${type === 'invoices' ? "today's invoices" : 'stock ledger'}...`);
+      const res = await window.api.invoke('system:export-csv', { type });
+      if (res.success) {
+        setExportStatus(`Export complete! Saved to: ${res.filePath}`);
+      } else if (res.reason === 'cancelled') {
+        setExportStatus(null);
+      } else {
+        setExportStatus(`Export failed: ${res.error?.message || 'unknown error'}`);
+      }
+    } catch (err: any) {
+      setExportStatus(`Export failed: ${err.message}`);
+    }
+  };
+
+  const widthCols = paperWidth === '58mm' ? 32 : 40;
+
+  const htmlPreview = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8" />
+        <style>
+          body {
+            font-family: 'Courier New', Courier, 'Consolas', monospace;
+            color: #000000;
+            background-color: #ffffff;
+            margin: 0;
+            padding: 8px 10px;
+            width: 100%;
+            box-sizing: border-box;
+            line-height: 1.2;
+          }
+          .shop-title {
+            font-size: 22px;
+            font-weight: 900;
+            text-align: center;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 8px;
+          }
+          .shop-info {
+            font-size: 13px;
+            font-weight: 500;
+            text-align: center;
+            margin-bottom: 4px;
+          }
+          .bill-title {
+            font-size: 18px;
+            font-weight: 800;
+            text-align: center;
+            margin: 8px 0;
+          }
+          .meta-container {
+            font-size: 14px;
+            margin-bottom: 6px;
+          }
+          .meta-line {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 2px;
+          }
+          .meta-label { font-weight: 900; }
+          .meta-val { font-weight: normal; }
+          .divider-dashed {
+            border-top: 1.5px dashed #000;
+            margin: 6px 0;
+          }
+          .divider-solid {
+            border-top: 2px solid #000;
+            margin: 6px 0;
+          }
+          table.receipt-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 6px 0;
+            table-layout: fixed;
+          }
+          table.receipt-table th {
+            font-size: 16px;
+            font-weight: 900;
+            text-transform: uppercase;
+            border-bottom: 1px solid #000000;
+            padding-bottom: 4px;
+            margin-bottom: 4px;
+          }
+          table.receipt-table td {
+            vertical-align: top;
+            padding: 4px 0;
+          }
+          .th-desc { text-align: left; width: 40%; }
+          .th-qty { text-align: center; width: 22%; font-weight: 900; }
+          .th-rate { text-align: right; width: 18%; }
+          .th-amt { text-align: right; width: 20%; }
+          
+          .td-desc {
+            font-size: 15px;
+            font-weight: 700;
+            text-align: left;
+            word-wrap: break-word;
+          }
+          .td-qty {
+            font-size: 15px;
+            font-weight: 900;
+            text-align: center;
+          }
+          .td-rate {
+            font-size: 15px;
+            font-weight: 700;
+            text-align: right;
+          }
+          .td-amt {
+            font-size: 15px;
+            font-weight: 800;
+            text-align: right;
+          }
+          .net-amount-container {
+            margin: 10px 0;
+          }
+          .net-amount {
+            font-size: 22px;
+            font-weight: 900;
+            display: flex;
+            justify-content: space-between;
+          }
+          .summary-line {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            margin: 6px 0;
+          }
+          .footer {
+            font-size: 13px;
+            text-align: center;
+            margin-top: 12px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="shop-title">${shopName || 'ISHANTH PROTEINS'}</div>
+        ${shopAddress ? shopAddress.split(',').map(al => `<div class="shop-info">${al.trim()}</div>`).join('') : '<div class="shop-info">123 Main Street</div>'}
+        ${shopPhone ? `<div class="shop-info">Ph: ${shopPhone}</div>` : ''}
+        
+        <div class="bill-title">CASH BILL</div>
+
+        <div class="meta-container" style="display: flex; justify-content: space-between;">
+          <div>
+            <div style="margin-bottom: 2px;"><span class="meta-label">Bill No : </span><span class="meta-val" style="font-weight: 900; font-size: 18px;">60</span></div>
+            <div><span class="meta-label">Cashier : </span><span class="meta-val">ADMIN</span></div>
+          </div>
+          <div>
+            <div style="margin-bottom: 2px;"><span class="meta-label">Date : </span><span class="meta-val">23/07/2026</span></div>
+            <div><span class="meta-label">Time : </span><span class="meta-val">05:00 PM</span></div>
+          </div>
+        </div>
+
+        <div class="divider-dashed"></div>
+
+        <table class="receipt-table">
+          <thead>
+            <tr>
+              <th class="th-desc">Description</th>
+              <th class="th-qty">Qty</th>
+              <th class="th-rate">Rate</th>
+              <th class="th-amt">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-desc">CHICKEN SKINLESS</td>
+              <td class="td-qty">0.500</td>
+              <td class="td-rate">330.00</td>
+              <td class="td-amt">165.00</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="divider-solid"></div>
+        
+        <div class="net-amount-container">
+          <div class="net-amount">
+            <span>NET AMOUNT</span>
+            <span>₹165.00</span>
+          </div>
+        </div>
+
+        <div class="divider-solid"></div>
+
+        <div class="summary-line">
+          <span><span class="meta-label">No.Of.Items </span><span class="meta-val">1</span></span>
+          <span><span class="meta-label">Total Qty </span><span class="meta-val">0.500</span></span>
+        </div>
+
+        <div class="divider-dashed"></div>
+        
+        <div class="footer">
+          ${footerMessage ? footerMessage.trim().replace(/\\n/g, '<br/>') : 'Thank you for your business! Visit again.'}
+        </div>
+      </body>
+      </html>
+  `;
+
+  const [settingsTab, setSettingsTab] = useState<'shortcuts' | 'appearance' | 'printer' | 'ratios'>('shortcuts');
+
+  if (configQuery.isLoading) {
+    return <div className="p-6 text-text-muted">Loading configurations...</div>;
+  }
+
+  return (
+    <div className="flex flex-col h-full bg-surface-app text-text-primary overflow-hidden">
+      {/* Top Settings Sub-Tabs Header */}
+      <div className="px-6 pt-4 pb-0 bg-surface-panel border-b border-border-subtle flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setSettingsTab('shortcuts')}
+            className={`py-2.5 px-4 text-xs font-black rounded-t-xl border-t border-x transition-all flex items-center gap-2 ${
+              settingsTab === 'shortcuts'
+                ? 'bg-surface-app border-border-subtle text-brand-500 shadow-subtle'
+                : 'bg-surface-card/40 border-transparent text-text-muted hover:text-text-primary'
+            }`}
+          >
+            <Keyboard size={16} />
+            Keyboard Shortcuts & Hotkeys
+          </button>
+
+          <button
+            onClick={() => setSettingsTab('appearance')}
+            className={`py-2.5 px-4 text-xs font-black rounded-t-xl border-t border-x transition-all flex items-center gap-2 ${
+              settingsTab === 'appearance'
+                ? 'bg-surface-app border-border-subtle text-brand-500 shadow-subtle'
+                : 'bg-surface-card/40 border-transparent text-text-muted hover:text-text-primary'
+            }`}
+          >
+            <Palette size={16} />
+            POS Appearance & Color Palette
+          </button>
+
+          <button
+            onClick={() => setSettingsTab('printer')}
+            className={`py-2.5 px-4 text-xs font-black rounded-t-xl border-t border-x transition-all flex items-center gap-2 ${
+              settingsTab === 'printer'
+                ? 'bg-surface-app border-border-subtle text-brand-500 shadow-subtle'
+                : 'bg-surface-card/40 border-transparent text-text-muted hover:text-text-primary'
+            }`}
+          >
+            <Printer size={16} />
+            Printer & Shop Profile Setup
+          </button>
+          <button
+            onClick={() => setSettingsTab('ratios')}
+            className={`py-2.5 px-4 text-xs font-black rounded-t-xl border-t border-x transition-all flex items-center gap-2 ${
+              settingsTab === 'ratios'
+                ? 'bg-surface-app border-border-subtle text-brand-500 shadow-subtle'
+                : 'bg-surface-card/40 border-transparent text-text-muted hover:text-text-primary'
+            }`}
+          >
+            <Drumstick size={16} />
+            Live Bird Yield & Ratios
+          </button>
+        </div>
+      </div>
+
+      {/* Tab Content */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        {settingsTab === 'shortcuts' ? (
+          <POSShortcutSettings />
+        ) : settingsTab === 'appearance' ? (
+          <POSAppearanceSettings />
+        ) : settingsTab === 'ratios' ? (
+          <MeatYieldSettingsTab />
+        ) : (
+          <div className="p-6 space-y-6">
+            <div className="border-b border-border-subtle pb-4">
+              <h2 className="text-xl font-bold font-outfit text-text-primary flex items-center gap-2">
+                <SettingsIcon className="text-brand-500" />
+                <span>Application Configurations & Thermal Printer Setup</span>
+              </h2>
+              <p className="text-text-muted text-xs mt-1">
+                Configure shop details, small thermal billing machine format, receipt headers/footers, and backups.
+              </p>
+            </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        {/* Left Column: Form Controls */}
+        <form onSubmit={handleSubmit} className="lg:col-span-7 bg-surface-panel border border-border-subtle rounded-xl p-6 space-y-6 shadow-elevation">
+          {/* Shop Profile Section */}
+          <div className="space-y-4">
+            <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2 flex items-center gap-2">
+              <ShoppingCart size={16} className="text-brand-500" />
+              <span>Shop Profile Information</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-text-muted uppercase">Shop Name</label>
+                <input
+                  type="text"
+                  value={shopName}
+                  onChange={e => setShopName(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-bold text-text-primary focus:border-brand-500"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-text-muted uppercase">Contact Phone</label>
+                <input
+                  type="text"
+                  value={shopPhone}
+                  onChange={e => setShopPhone(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-bold text-text-primary focus:border-brand-500"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-bold text-text-muted uppercase">Shop Address</label>
+                <input
+                  type="text"
+                  value={shopAddress}
+                  onChange={e => setShopAddress(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary focus:border-brand-500"
+                  required
+                />
+              </div>
+
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-bold text-text-muted uppercase">GSTIN / TAX Identification Code</label>
+                <input
+                  type="text"
+                  value={shopGSTIN}
+                  onChange={e => setShopGSTIN(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-mono text-text-primary focus:border-brand-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Thermal Printer Machine Setup */}
+          <div className="space-y-4 pt-2 border-t border-border-subtle">
+            <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2 flex items-center gap-2">
+              <Printer size={16} className="text-brand-500" />
+              <span>Thermal Printer & Bill Template Settings</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-bold text-text-muted uppercase">Thermal Paper Roll Width</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setPaperWidth('58mm')}
+                    className={`py-3 px-3 rounded-lg border text-xs font-bold transition-all text-left flex flex-col justify-between ${
+                      paperWidth === '58mm'
+                        ? 'bg-brand-500/10 border-brand-500 text-brand-500 shadow-subtle'
+                        : 'bg-surface-card border-border-subtle text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    <span className="font-extrabold text-sm">58 mm (Small Thermal Machine)</span>
+                    <span className="text-[10px] opacity-80 font-mono mt-1">32 columns width · Compact receipts</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaperWidth('80mm')}
+                    className={`py-3 px-3 rounded-lg border text-xs font-bold transition-all text-left flex flex-col justify-between ${
+                      paperWidth === '80mm'
+                        ? 'bg-brand-500/10 border-brand-500 text-brand-500 shadow-subtle'
+                        : 'bg-surface-card border-border-subtle text-text-muted hover:text-text-primary'
+                    }`}
+                  >
+                    <span className="font-extrabold text-sm">80 mm (Standard POS Printer)</span>
+                    <span className="text-[10px] opacity-80 font-mono mt-1">40 columns width · Standard receipts</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-bold text-text-muted uppercase">Receipt Header Tagline / Note</label>
+                <input
+                  type="text"
+                  value={headerMessage}
+                  onChange={e => setHeaderMessage(e.target.value)}
+                  placeholder="e.g. Fresh Quality Meats Daily"
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary focus:border-brand-500"
+                />
+              </div>
+
+              <div className="space-y-1.5 md:col-span-2">
+                <label className="text-[11px] font-bold text-text-muted uppercase">Receipt Footer Message</label>
+                <input
+                  type="text"
+                  value={footerMessage}
+                  onChange={e => setFooterMessage(e.target.value)}
+                  placeholder="e.g. Thank you for your business! Visit again."
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs text-text-primary focus:border-brand-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <input
+                  type="checkbox"
+                  id="showGst"
+                  checked={showGstBreakdown}
+                  onChange={e => setShowGstBreakdown(e.target.checked)}
+                  className="w-4 h-4 rounded text-brand-500 focus:ring-brand-500 accent-brand-500"
+                />
+                <label htmlFor="showGst" className="text-xs font-bold text-text-secondary select-none cursor-pointer">
+                  Show CGST / SGST breakdown lines
+                </label>
+              </div>
+
+              <div className="flex items-center gap-3 pt-1">
+                <input
+                  type="checkbox"
+                  id="autoPrint"
+                  checked={autoPrintOnComplete}
+                  onChange={e => setAutoPrintOnComplete(e.target.checked)}
+                  className="w-4 h-4 rounded text-brand-500 focus:ring-brand-500 accent-brand-500"
+                />
+                <label htmlFor="autoPrint" className="text-xs font-bold text-text-secondary select-none cursor-pointer">
+                  Auto-print bill on sale complete
+                </label>
+              </div>
+            </div>
+
+            {/* Fast Billing & Shortcut Settings */}
+            <div className="bg-surface-panel border border-border-subtle rounded-xl p-5 shadow-elevation space-y-4">
+              <h3 className="text-xs font-extrabold text-text-primary uppercase tracking-wider flex items-center gap-2 border-b border-border-subtle pb-3">
+                <Zap size={15} className="text-amber-400" />
+                <span>Fast Billing & Keyboard Workflow Settings</span>
+              </h3>
+
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 p-3 bg-surface-card border border-border-subtle rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="skipPaymentConf"
+                    checked={skipPaymentConfirmation}
+                    onChange={e => setSkipPaymentConfirmation(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded text-brand-500 focus:ring-brand-500 accent-brand-500 cursor-pointer"
+                  />
+                  <div className="space-y-0.5">
+                    <label htmlFor="skipPaymentConf" className="text-xs font-black text-text-primary select-none cursor-pointer">
+                      Print bill without confirming Cash/UPI split
+                    </label>
+                    <p className="text-[11px] text-text-muted leading-relaxed">
+                      When enabled, pressing <kbd className="px-1.5 py-0.5 bg-surface-panel border border-border-subtle rounded font-mono text-[10px] text-brand-500 font-bold">Spacebar</kbd> on the billing screen immediately prints the bill using the default payment method below, bypassing confirmation for maximum checkout speed.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-surface-card border border-border-subtle rounded-lg space-y-2">
+                  <label className="text-[11px] font-black text-text-primary uppercase block">
+                    Default Payment Method (for 1-Touch Spacebar Print)
+                  </label>
+                  <select
+                    value={defaultPaymentMethod}
+                    onChange={e => setDefaultPaymentMethod(e.target.value as any)}
+                    className="w-full bg-surface-panel border border-border-subtle rounded-lg px-3 py-2 text-xs font-bold text-text-primary focus:border-brand-500 outline-none"
+                  >
+                    <option value="cash">Cash (Default)</option>
+                    <option value="upi">UPI</option>
+                    <option value="card">Card</option>
+                    <option value="split">Split Payment</option>
+                  </select>
+                </div>
+
+                <div className="flex items-start gap-3 p-3 bg-surface-card border border-border-subtle rounded-lg">
+                  <input
+                    type="checkbox"
+                    id="enableCalcWidget"
+                    checked={enableCalculatorWidget}
+                    onChange={e => setEnableCalculatorWidget(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded text-brand-500 focus:ring-brand-500 accent-brand-500 cursor-pointer"
+                  />
+                  <div className="space-y-0.5">
+                    <label htmlFor="enableCalcWidget" className="text-xs font-black text-text-primary select-none cursor-pointer">
+                      Show Quick Calculator & Meat Yield Widget on Billing Screen
+                    </label>
+                    <p className="text-[11px] text-text-muted leading-relaxed">
+                      Provides a bottom-right floating widget with a keyboard-compatible arithmetic calculator and live meat dressing/wastage calculation.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-border-subtle flex justify-end">
+            <button
+              type="submit"
+              disabled={updateConfigMutation.isPending}
+              className="btn-primary px-6 py-2.5 text-xs font-extrabold"
+            >
+              {updateConfigMutation.isPending ? 'Saving Settings...' : 'Save Printer & Shop Settings'}
+            </button>
+          </div>
+        </form>
+
+        {/* Right Column: Thermal Paper Live Preview Card */}
+        <div className="lg:col-span-5 flex flex-col">
+          <div className="bg-surface-panel border border-border-subtle rounded-xl p-5 shadow-elevation flex flex-col h-full space-y-3">
+            <div className="flex items-center justify-between border-b border-border-subtle pb-3">
+              <div>
+                <h3 className="text-xs font-extrabold text-text-primary uppercase tracking-wider flex items-center gap-2">
+                  <Printer size={15} className="text-brand-500" />
+                  <span>Live Thermal Bill Preview</span>
+                </h3>
+                <p className="text-[10px] text-text-muted mt-0.5">
+                  Small thermal machine layout ({paperWidth} · {widthCols} cols)
+                </p>
+              </div>
+              <span className="px-2.5 py-1 rounded text-[10px] font-mono font-bold bg-brand-500/10 text-brand-500 border border-brand-500/50 uppercase">
+                {paperWidth}
+              </span>
+            </div>
+
+            {/* Thermal Roll Output Container */}
+            <div className="flex-1 bg-white border border-border-subtle shadow-inner select-none overflow-hidden h-[480px]">
+              <iframe
+                title="Thermal Receipt Preview"
+                srcDoc={htmlPreview}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+              />
+            </div>
+
+            <div className="text-[10px] text-text-muted text-center italic">
+              * Updates dynamically as you edit paper size, header, footer, or shop info.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Database Utility Section */}
+      <div className="max-w-7xl bg-surface-panel border border-border-subtle rounded-xl p-6 space-y-5 shadow-elevation">
+        <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2">
+          Database Backup & Data Export
+        </h3>
+
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border-subtle/50 pb-4">
+            <div>
+              <p className="text-xs font-bold text-text-primary">WAL-Safe SQLite Backup</p>
+              <p className="text-[11px] text-text-muted mt-0.5">Safely copy the live database to a destination of your choice. Cleans up backups older than the last 7 files.</p>
+            </div>
+            <button
+              onClick={handleBackup}
+              className="btn-primary text-xs font-bold flex-shrink-0"
+            >
+              Back Up Database
+            </button>
+          </div>
+
+          {backupStatus && (
+            <div className="text-[11px] font-medium bg-brand-500/10 border border-brand-500/50 text-brand-500 p-2.5 rounded-lg break-all">
+              {backupStatus}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-xs font-bold text-text-primary">CSV Spreadsheet Exports</p>
+              <p className="text-[11px] text-text-muted mt-0.5">Export current transaction summaries or stock ledger for Excel viewing.</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleExport('invoices')}
+                className="btn-secondary text-xs font-bold"
+              >
+                Export Invoices
+              </button>
+              <button
+                onClick={() => handleExport('ledger')}
+                className="btn-secondary text-xs font-bold"
+              >
+                Export Stock Ledger
+              </button>
+            </div>
+          </div>
+
+          {exportStatus && (
+            <div className="text-[11px] font-medium bg-blue-950/40 border border-blue-800/40 text-blue-400 p-2.5 rounded-lg break-all">
+              {exportStatus}
+            </div>
+          )}
+        </div>
+      </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MeatYieldSettingsTab() {
+  const {
+    chickenWholeRatio,
+    chickenBonelessRatio,
+    goatLiveToDressedPercent,
+    setChickenWholeRatio,
+    setChickenBonelessRatio,
+    setGoatLiveToDressedPercent,
+    resetToDefaults,
+  } = useMeatShopConfigStore();
+
+  const [wholeRatioInput, setWholeRatioInput] = useState(chickenWholeRatio.toString());
+  const [bonelessRatioInput, setBonelessRatioInput] = useState(chickenBonelessRatio.toString());
+  const [goatPercentInput, setGoatPercentInput] = useState(goatLiveToDressedPercent.toString());
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  useEffect(() => {
+    setWholeRatioInput(chickenWholeRatio.toString());
+    setBonelessRatioInput(chickenBonelessRatio.toString());
+    setGoatPercentInput(goatLiveToDressedPercent.toString());
+  }, [chickenWholeRatio, chickenBonelessRatio, goatLiveToDressedPercent]);
+
+  const handleSave = (e: React.FormEvent) => {
+    e.preventDefault();
+    const w = parseFloat(wholeRatioInput);
+    const b = parseFloat(bonelessRatioInput);
+    const g = parseFloat(goatPercentInput);
+    if (!isNaN(w) && w > 0) setChickenWholeRatio(w);
+    if (!isNaN(b) && b > 0) setChickenBonelessRatio(b);
+    if (!isNaN(g) && g > 0) setGoatLiveToDressedPercent(g);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+  };
+
+  const handleReset = () => {
+    if (confirm('Reset all yield ratios to standard defaults?')) {
+      resetToDefaults();
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2500);
+    }
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="border-b border-border-subtle pb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold font-outfit text-text-primary flex items-center gap-2">
+            <Drumstick className="text-brand-500" />
+            <span>Live Bird Yield & Wastage Ratios</span>
+          </h2>
+          <p className="text-text-muted text-xs mt-1">
+            Configure standard carcass yield ratios for live bird estimations and wastage calculations across Billing and Yield Workspaces.
+          </p>
+        </div>
+        {saveSuccess && (
+          <div className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400 text-xs font-bold flex items-center gap-1.5 animate-in fade-in">
+            <CheckCircle2 size={15} /> Ratios saved successfully!
+          </div>
+        )}
+      </div>
+
+      <div className="max-w-2xl bg-surface-panel border border-border-subtle rounded-xl p-6 shadow-elevation space-y-6">
+        <form onSubmit={handleSave} className="space-y-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-text-primary">
+                Whole Chicken Ratio (Live kg / 1 kg Dressed)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1.0"
+                  max="3.5"
+                  value={wholeRatioInput}
+                  onChange={e => setWholeRatioInput(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-bold font-mono text-text-primary focus:border-brand-500 outline-none"
+                  required
+                />
+              </div>
+              <p className="text-[10px] text-text-muted">
+                Default: <strong className="text-text-secondary">1.60</strong> (e.g. 1.6 kg live bird gives ~1.0 kg whole cut meat)
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-text-primary">
+                Boneless Chicken Ratio (Live kg / 1 kg Boneless)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="1.0"
+                  max="4.5"
+                  value={bonelessRatioInput}
+                  onChange={e => setBonelessRatioInput(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-bold font-mono text-text-primary focus:border-brand-500 outline-none"
+                  required
+                />
+              </div>
+              <p className="text-[10px] text-text-muted">
+                Default: <strong className="text-text-secondary">1.90</strong> (e.g. 1.9 kg live bird gives ~1.0 kg boneless meat)
+              </p>
+            </div>
+
+            <div className="space-y-1.5 md:col-span-2 pt-2 border-t border-border-subtle/50">
+              <label className="text-xs font-bold text-text-primary">
+                Goat / Mutton Live to Dressed Meat Yield (%)
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.5"
+                  min="30"
+                  max="90"
+                  value={goatPercentInput}
+                  onChange={e => setGoatPercentInput(e.target.value)}
+                  className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-xs font-bold font-mono text-text-primary focus:border-brand-500 outline-none"
+                  required
+                />
+              </div>
+              <p className="text-[10px] text-text-muted">
+                Default: <strong className="text-text-secondary">58.0%</strong> (Average dressed carcass percentage from live weight)
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-4 border-t border-border-subtle">
+            <button
+              type="button"
+              onClick={handleReset}
+              className="px-3 py-2 bg-surface-card hover:bg-surface-hover text-text-secondary hover:text-text-primary rounded-lg text-xs font-bold border border-border-subtle transition-all"
+            >
+              Reset to Defaults
+            </button>
+            <button
+              type="submit"
+              className="btn-primary py-2 px-5 text-xs font-bold flex items-center gap-1.5 shadow-subtle"
+            >
+              <CheckCircle2 size={14} />
+              Save Ratios
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Help View ────────────────────────────────────────────────────────────────
+function HelpView({ sysInfo }: { sysInfo: any }) {
+  return (
+    <div className="p-6 space-y-6 overflow-y-auto h-full bg-surface-app text-text-primary">
+      <div className="border-b border-border-subtle pb-4">
+        <h2 className="text-xl font-bold font-outfit text-text-primary flex items-center gap-2">
+          <HelpCircle className="text-brand-500" />
+          <span>System Help & Diagnostics Center</span>
+        </h2>
+        <p className="text-text-muted text-xs mt-1">Access developer diagnostic details, native platform runtime specifications, keyboard layouts, and customer support.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Runtime Diagnostics */}
+        <div className="bg-surface-panel border border-border-subtle rounded-xl p-5 space-y-4 shadow-elevation">
+          <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2 flex items-center gap-2">
+            <Database size={16} className="text-blue-400" />
+            <span>SQLite & Platform Engines</span>
+          </h3>
+
+          <div className="text-xs space-y-3 font-medium text-text-secondary">
+            <div className="flex justify-between border-b border-border-subtle/40 pb-1.5">
+              <span className="text-text-muted">Database Path</span>
+              <span className="font-mono text-[10px] break-all max-w-[70%] text-right text-text-primary">{sysInfo?.dbPath || 'Loading'}</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle/40 pb-1.5">
+              <span className="text-text-muted">OS Environment</span>
+              <span className="font-mono text-text-primary">{sysInfo?.platform} ({sysInfo?.arch})</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle/40 pb-1.5">
+              <span className="text-text-muted">Node JS Engine</span>
+              <span className="font-mono text-text-primary">{sysInfo?.nodeVersion}</span>
+            </div>
+            <div className="flex justify-between border-b border-border-subtle/40 pb-1.5">
+              <span className="text-text-muted">Chromium Kernel</span>
+              <span className="font-mono text-text-primary">{sysInfo?.chromeVersion}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-muted">Electron Context</span>
+              <span className="font-mono text-text-primary">{sysInfo?.electronVersion}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Shortcuts Map */}
+        <div className="bg-surface-panel border border-border-subtle rounded-xl p-5 space-y-4 shadow-elevation">
+          <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2 flex items-center gap-2">
+            <Keyboard size={16} className="text-amber-400" />
+            <span>Standard ERP Keyboard Navigation</span>
+          </h3>
+
+          <table className="w-full text-xs text-left">
+            <thead>
+              <tr className="text-text-muted border-b border-border-subtle">
+                <th className="pb-2 font-semibold">Target Action</th>
+                <th className="pb-2 text-right font-semibold">Hotkey Command</th>
+              </tr>
+            </thead>
+            <tbody className="font-medium text-text-secondary">
+              <tr className="border-b border-border-subtle/30">
+                <td className="py-2">Go to Billing / POS</td>
+                <td className="py-2 text-right"><kbd className="bg-surface-card border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[10px] text-text-primary">Ctrl+1</kbd></td>
+              </tr>
+              <tr className="border-b border-border-subtle/30">
+                <td className="py-2">Go to Inventory / Stock</td>
+                <td className="py-2 text-right"><kbd className="bg-surface-card border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[10px] text-text-primary">Ctrl+2</kbd></td>
+              </tr>
+              <tr className="border-b border-border-subtle/30">
+                <td className="py-2">Go to Reports / Sales</td>
+                <td className="py-2 text-right"><kbd className="bg-surface-card border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[10px] text-text-primary">Ctrl+4</kbd></td>
+              </tr>
+              <tr className="border-b border-border-subtle/30">
+                <td className="py-2">Go to Products Manager</td>
+                <td className="py-2 text-right"><kbd className="bg-surface-card border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[10px] text-text-primary">Ctrl+3</kbd></td>
+              </tr>
+              <tr className="border-b border-border-subtle/30">
+                <td className="py-2">Go to Settings Manager</td>
+                <td className="py-2 text-right"><kbd className="bg-surface-card border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[10px] text-text-primary">Ctrl+,</kbd></td>
+              </tr>
+              <tr>
+                <td className="py-2">Toggle Theme Colors</td>
+                <td className="py-2 text-right"><kbd className="bg-surface-card border border-border-subtle px-1.5 py-0.5 rounded font-mono text-[10px] text-text-primary">Ctrl+T</kbd></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Quick Usage Notes */}
+        <div className="bg-surface-panel border border-border-subtle rounded-xl p-5 space-y-4 shadow-elevation">
+          <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2 flex items-center gap-2">
+            <HelpCircle size={16} className="text-brand-500" />
+            <span>Retail Operations & Workflow Guides</span>
+          </h3>
+
+          <div className="text-xs space-y-3.5 text-text-secondary leading-relaxed">
+            <div>
+              <p className="font-bold text-text-primary">🛒 Draft / Hold & POS Checkout</p>
+              <p className="text-text-muted mt-0.5">Click items in Catalog to add to the cart. If weighing, type the exact grams in the weight entry dialog. Hold/Resume bills to handle multi-customer queues dynamically.</p>
+            </div>
+            <div>
+              <p className="font-bold text-text-primary">📦 Purchases & Stock Ledger</p>
+              <p className="text-text-muted mt-0.5">Record new inventory under "Purchases" tab in Inventory. Specify the supplier, variant, and invoice cost. Wastage adjustments can be logged separately with auditor reasons.</p>
+            </div>
+            <div>
+              <p className="font-bold text-text-primary">📊 Sales Summaries & Profit Analytics</p>
+              <p className="text-text-muted mt-0.5">Switch to Reports view to filter sales by date. The system automatically reconciles invoice items against historical purchase records to compute profitability margins.</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Support contacts */}
+        <div className="bg-surface-panel border border-border-subtle rounded-xl p-5 space-y-4 shadow-elevation">
+          <h3 className="font-bold text-sm text-text-primary border-b border-border-subtle pb-2 flex items-center gap-2">
+            <Phone size={16} className="text-blue-400" />
+            <span>Technical Helpdesk & Contacts</span>
+          </h3>
+
+          <div className="text-xs space-y-3 text-text-secondary font-medium">
+            <p className="text-text-muted">For enterprise license issues, custom hardware configurations (weighing scales, thermal printers), or system updates, reach out to support:</p>
+            <div className="bg-surface-card border border-border-subtle rounded-lg p-3 space-y-2">
+              <div className="flex justify-between">
+                <span className="text-text-muted">Enterprise Hotline:</span>
+                <span className="font-bold text-text-primary">+91 1800 555 4321</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">E-Mail Service Desk:</span>
+                <span className="font-bold text-text-primary">support@meatshoppos.com</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-text-muted">Service Hours:</span>
+                <span className="font-bold text-text-primary">08:00 AM - 10:00 PM IST (Mon-Sun)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Layout ──────────────────────────────────────────────────────────────
+function MainLayout() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { config, updateConfig } = useAppearance();
+  const theme = config.mode === 'dark' ? 'dark' : 'light';
+
+  const activePage: Page = location.pathname === '/settings'
+    ? 'settings'
+    : location.pathname === '/help'
+      ? 'help'
+      : location.pathname === '/products'
+        ? 'products'
+        : location.pathname === '/inventory'
+          ? 'inventory'
+          : location.pathname === '/purchases'
+            ? 'purchases'
+            : location.pathname === '/payments'
+              ? 'payments'
+              : location.pathname === '/reports'
+            ? 'reports'
+            : location.pathname === '/customers'
+              ? 'customers'
+              : location.pathname === '/ar_reports'
+                ? 'ar_reports'
+                : location.pathname === '/hr'
+                  ? 'hr'
+                  : location.pathname === '/cashbox'
+                    ? 'cashbox'
+                    : location.pathname === '/expenses'
+                      ? 'expenses'
+                      : location.pathname === '/prices'
+                        ? 'prices'
+                        : location.pathname === '/ledgers'
+                          ? 'ledgers'
+                          : location.pathname === '/health'
+                            ? 'health'
+                            : location.pathname === '/forecasting'
+                              ? 'forecasting'
+                              : 'billing';
+
+  const handleToggleTheme = useCallback(() => {
+    const nextMode = config.mode === 'dark' ? 'light' : 'dark';
+    updateConfig({ mode: nextMode });
+  }, [config.mode, updateConfig]);
+
+  const handleNavigate = useCallback((page: Page) => {
+    if (page === 'billing') {
+      navigate('/');
+      setTimeout(() => {
+        const input = document.getElementById('quick-product-search-input');
+        if (input) (input as HTMLInputElement).focus();
+      }, 50);
+    } else {
+      navigate(`/${page}`);
+    }
+  }, [navigate]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      const isInputFocused = activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.getAttribute('contenteditable') === 'true'
+      );
+
+      if (isInputFocused) return;
+
+      if (e.key === 'F1') {
+        e.preventDefault();
+        handleNavigate('help');
+      }
+      if (e.ctrlKey) {
+        if (e.key === '1') { e.preventDefault(); handleNavigate('billing'); }
+        else if (e.key === '2') { e.preventDefault(); handleNavigate('inventory'); }
+        else if (e.key === '3') { e.preventDefault(); handleNavigate('products'); }
+        else if (e.key === '4') { e.preventDefault(); handleNavigate('reports'); }
+        else if (e.key === '5') { e.preventDefault(); handleNavigate('customers'); }
+        else if (e.key === '6') { e.preventDefault(); handleNavigate('ar_reports'); }
+        else if (e.key === ',') { e.preventDefault(); handleNavigate('settings'); }
+        else if (e.key.toLowerCase() === 't') { e.preventDefault(); handleToggleTheme(); }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleNavigate, handleToggleTheme]);
+
+
+
+  const dbHealthQuery = useQuery({
+    queryKey: ['dbHealth'],
+    queryFn: () => window.api.invoke(IPC_CHANNELS.DATABASE.HEALTH).then((res: any) => {
+      if (!res.success) throw new Error(res.error.message);
+      return res.data;
+    }),
+    refetchInterval: 10000,
+  });
+
+  const sysInfoQuery = useQuery({
+    queryKey: ['systemInfo'],
+    queryFn: () => window.api.invoke(IPC_CHANNELS.SYSTEM.GET_INFO).then((res: any) => {
+      if (!res.success) throw new Error(res.error.message);
+      return res.data;
+    })
+  });
+
+  useQuery<AppConfig>({
+    queryKey: ['config'],
+    queryFn: () => window.api.invoke(IPC_CHANNELS.CONFIG.GET).then((res: any) => {
+      if (!res.success) throw new Error(res.error.message);
+      return res.data;
+    })
+  });
+
+  const { data: session, isLoading: isSessionLoading } = useSession();
+  const [isDailyPromptOpen, setIsDailyPromptOpen] = useState(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const lastPromptDate = localStorage.getItem('pos_daily_cashier_prompt_date');
+    return lastPromptDate !== today;
+  });
+
+  const handleCloseDailyPrompt = () => {
+    const today = new Date().toISOString().split('T')[0];
+    localStorage.setItem('pos_daily_cashier_prompt_date', today);
+    setIsDailyPromptOpen(false);
+    setTimeout(() => {
+      const input = document.getElementById('quick-product-search-input');
+      if (input) (input as HTMLInputElement).focus();
+    }, 50);
+  };
+
+  if (isSessionLoading) {
+    return (
+      <div className="min-h-screen bg-surface-app flex flex-col items-center justify-center text-text-muted gap-3">
+        <div className="w-8 h-8 rounded-full border-4 border-brand-500 border-t-transparent animate-spin" />
+        <span className="text-xs font-semibold text-text-secondary">Loading session...</span>
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginScreen />;
+  }
+
+  return (
+    <div className="flex h-full w-full bg-surface-app text-text-primary overflow-hidden font-sans">
+      <DailyCashierPromptModal
+        isOpen={isDailyPromptOpen}
+        onClose={handleCloseDailyPrompt}
+      />
+
+      <Sidebar
+        activePage={activePage}
+        onNavigate={handleNavigate}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        <main className="flex-1 min-h-0 bg-surface-app flex flex-col">
+            <Routes>
+              <Route path="/" element={<BillingView />} />
+              <Route path="/inventory" element={<InventoryView />} />
+              <Route path="/purchases" element={<PurchasesWorkspace />} />
+              <Route path="/payments" element={<PaymentsReceiptsView />} />
+              <Route path="/reports" element={<ReportsView />} />
+              <Route path="/products" element={<ProductManagementView />} />
+              <Route path="/customers" element={<CustomerList />} />
+              <Route path="/ar_reports" element={<ARReportsView />} />
+              <Route path="/hr" element={<HRManagementView />} />
+              <Route path="/cashbox" element={<CashBoxView />} />
+              <Route path="/expenses" element={<ExpenseManagementView />} />
+              <Route path="/prices" element={<DailyMarketPricesView />} />
+              <Route path="/ledgers" element={<EnterpriseLedgerView />} />
+              <Route path="/yield" element={<MeatProcessingYieldView />} />
+              <Route path="/health" element={<SystemHealthView />} />
+              <Route path="/forecasting" element={<DemandForecastingView />} />
+              <Route path="/settings" element={<SettingsView />} />
+              <Route path="/help" element={<HelpView sysInfo={sysInfoQuery.data} />} />
+            </Routes>
+        </main>
+
+        <Statusbar dbHealth={dbHealthQuery.data} sysInfo={sysInfoQuery.data} />
+      </div>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <MemoryRouter>
+      <MainLayout />
+    </MemoryRouter>
+  );
+}

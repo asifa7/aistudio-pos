@@ -1,0 +1,8 @@
+{
+  "name": "Meat Shop POS",
+  "description": "Commercial POS Desktop & Web Software for Meat Shops with inventory, billing, purchases, and reporting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

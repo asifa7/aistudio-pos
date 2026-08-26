@@ -1,0 +1,18 @@
+import { z } from 'zod';
+
+export const CreatePurchaseSchema = z.object({
+  supplier_id: z.number().int().positive(),
+  product_variant_id: z.number().int().positive(),
+  quantity_grams: z.number().int().positive().nullish(),
+  quantity_units: z.number().int().positive().nullish(),
+  cost_paise: z.number().int().positive(),
+  created_by: z.number().int().positive(),
+}).refine(
+  data => (data.quantity_grams !== null && data.quantity_grams !== undefined) !== (data.quantity_units !== null && data.quantity_units !== undefined),
+  {
+    message: 'Either quantity_grams or quantity_units must be provided, but not both',
+    path: ['quantity_grams'],
+  }
+);
+
+export type CreatePurchaseInput = z.infer<typeof CreatePurchaseSchema>;

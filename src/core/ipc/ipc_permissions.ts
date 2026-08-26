@@ -1,0 +1,294 @@
+import { authService } from '../../modules/auth/backend/service/auth_service';
+import { PermissionError } from '../errors/app_errors';
+
+export type UserRole = 'ADMIN' | 'MANAGER' | 'CASHIER' | 'ACCOUNTANT' | 'STOREKEEPER' | 'HR';
+
+const ROLE_PERMISSIONS: Record<string, UserRole[]> = {
+  // Configs & System
+  'config:get': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'config:update': ['ADMIN', 'MANAGER'],
+  'system:get-info': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'system:log': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'system:backup-database': ['ADMIN'],
+  'system:export-csv': ['ADMIN'],
+
+  // DB
+  'db:health': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'db:run-migrations': ['ADMIN'],
+
+  // Auth
+  'auth:login': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'auth:logout': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'auth:get-session': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Billing
+  'billing:create-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:get-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:add-item': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:update-item-qty': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:remove-item': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:hold-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:resume-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:complete-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:reopen-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:void-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:return-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:toggle-gst': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:record-payment': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:list-held': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:delete-draft': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:print-receipt': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:link-customer': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:search-invoices': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Inventory
+  'inventory:get-stock': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:adjust-stock': ['ADMIN', 'MANAGER'],
+  'inventory:list-low-stock': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:get-txn-history': ['ADMIN', 'MANAGER'],
+  'inventory:get-adj-history': ['ADMIN', 'MANAGER'],
+  'inventory:process-pending': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:list-suppliers': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:create-supplier': ['ADMIN', 'MANAGER'],
+  'inventory:record-purchase': ['ADMIN', 'MANAGER'],
+  'inventory:record-quick-purchase': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:list-purchases': ['ADMIN', 'MANAGER'],
+  'inventory:get-oversold-records': ['ADMIN', 'MANAGER'],
+  'inventory:get-indicators': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:get-passbook-ledger': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:edit-purchase': ['ADMIN', 'MANAGER'],
+  'inventory:print-purchase-thermal': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:submit-physical-count': ['ADMIN'],
+  'inventory:get-last-physical-count': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:get-sidebar-summary': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:list-batches': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:execute-yield': ['ADMIN', 'MANAGER'],
+  'inventory:list-yield-runs': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:log-livestock-loss': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:get-locations': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:initiate-transfer': ['ADMIN', 'MANAGER'],
+  'inventory:confirm-transfer-receipt': ['ADMIN'],
+  'inventory:list-transfers': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:bulk-import-products': ['ADMIN'],
+  'inventory:get-valuation-report': ['ADMIN', 'MANAGER'],
+  'inventory:get-movement-report': ['ADMIN', 'MANAGER'],
+  'inventory:get-wastage-report': ['ADMIN', 'MANAGER'],
+  'inventory:get-cogs-report': ['ADMIN', 'MANAGER'],
+  'inventory:get-item-analytics': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:get-purchasing-suggestions': ['ADMIN', 'MANAGER'],
+  'inventory:get-upcoming-events': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:list-calendar-events': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:create-calendar-event': ['ADMIN', 'MANAGER'],
+  'inventory:delete-calendar-event': ['ADMIN', 'MANAGER'],
+  'inventory:get-pending-bulk-orders': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:create-bulk-order': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:cancel-bulk-order': ['ADMIN', 'MANAGER'],
+  'inventory:correct-batch': ['ADMIN', 'MANAGER'],
+  'inventory:get-refrigerator-stock': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:record-fridge-removal': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:record-fridge-addition': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory:get-fridge-activity-log': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:invoice-update-status': ['ADMIN', 'MANAGER'],
+
+  // Reports
+  'reports:get-sales-summary': ['ADMIN', 'MANAGER'],
+  'reports:get-category-sales': ['ADMIN', 'MANAGER'],
+  'reports:get-profit-summary': ['ADMIN', 'MANAGER'],
+
+  // Products
+  'products:get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'products:create': ['ADMIN', 'MANAGER'],
+  'products:update': ['ADMIN', 'MANAGER'],
+  'products:deactivate': ['ADMIN', 'MANAGER'],
+  'products:reactivate': ['ADMIN', 'MANAGER'],
+  'products:delete': ['ADMIN'],
+  'products:create-variant': ['ADMIN', 'MANAGER'],
+  'products:update-variant-name': ['ADMIN', 'MANAGER'],
+  'products:deactivate-variant': ['ADMIN', 'MANAGER'],
+  'products:reactivate-variant': ['ADMIN', 'MANAGER'],
+  'products:delete-variant': ['ADMIN'],
+  'products:update-rate': ['ADMIN', 'MANAGER'],
+  'products:update-variant-yield': ['ADMIN', 'MANAGER'],
+  'products:get-rate-history': ['ADMIN', 'MANAGER'],
+  'products:update-tracking-mode': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'products:get-tracking-history': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Customers
+  'customers:get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:get-by-id': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:search': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:create': ['ADMIN', 'MANAGER'],
+  'customers:update': ['ADMIN', 'MANAGER'],
+  'customers:deactivate': ['ADMIN', 'MANAGER'],
+  'customers:reactivate': ['ADMIN', 'MANAGER'],
+  'customers:get-groups': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:get-activity-log': ['ADMIN', 'MANAGER'],
+  'customers:get-credit-account': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:update-credit-limit': ['ADMIN', 'MANAGER'],
+  'customers:freeze-credit': ['ADMIN', 'MANAGER'],
+  'customers:unfreeze-credit': ['ADMIN', 'MANAGER'],
+  'customers:blacklist': ['ADMIN'],
+  'customers:unblacklist': ['ADMIN'],
+  'customers:validate-credit-sale': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:create-credit-sale': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:record-payment': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:deposit-advance': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:apply-advance': ['ADMIN', 'MANAGER'],
+  'customers:write-off': ['ADMIN'],
+  'customers:create-credit-note': ['ADMIN', 'MANAGER'],
+  'customers:get-credit-notes': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:get-unpaid-invoices': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'customers:get-credit-transactions': ['ADMIN', 'MANAGER'],
+  'customers:get-ledger': ['ADMIN', 'MANAGER'],
+  'customers:get-statement': ['ADMIN', 'MANAGER'],
+  'customers:create-reminder': ['ADMIN', 'MANAGER'],
+  'customers:get-reminders': ['ADMIN', 'MANAGER'],
+  'customers:get-aging-report': ['ADMIN', 'MANAGER'],
+  'customers:get-outstanding-report': ['ADMIN', 'MANAGER'],
+  'customers:get-collection-report': ['ADMIN', 'MANAGER'],
+  'customers:get-advance-report': ['ADMIN', 'MANAGER'],
+  'customers:get-overdue-report': ['ADMIN', 'MANAGER'],
+  'customers:get-top-debtors': ['ADMIN', 'MANAGER'],
+  'customers:get-statement-report': ['ADMIN', 'MANAGER'],
+  'customers:get-credit-utilization': ['ADMIN', 'MANAGER'],
+
+  // Suppliers
+  'suppliers:create': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:update': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-by-id': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:create-category': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-categories': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:add-contact': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-contacts': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:remove-contact': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:add-address': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-addresses': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:remove-address': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:add-bank-account': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-bank-accounts': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:remove-bank-account': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:upsert-payment-terms': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-payment-terms': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:rate': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:record-payment': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:record-adjustment': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-ledger': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-statement': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-aging-report': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'suppliers:get-statement-report': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Procurement
+  'procurement:po-create': ['ADMIN', 'MANAGER'],
+  'procurement:po-submit': ['ADMIN', 'MANAGER'],
+  'procurement:po-approve': ['ADMIN', 'MANAGER'],
+  'procurement:po-cancel': ['ADMIN', 'MANAGER'],
+  'procurement:po-get-by-id': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:po-get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:grn-create': ['ADMIN', 'MANAGER'],
+  'procurement:grn-get-by-id': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:grn-get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:invoice-create': ['ADMIN', 'MANAGER'],
+  'procurement:invoice-get-by-id': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:invoice-get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:return-create': ['ADMIN', 'MANAGER'],
+  'procurement:return-get-by-id': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:return-get-all': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:get-price-history': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:get-cheapest-supplier': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'procurement:get-purchase-register': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // HR & Payroll
+  'hr:get-employees': ['ADMIN', 'MANAGER', 'CASHIER', 'HR'],
+  'hr:create-employee': ['ADMIN', 'MANAGER', 'HR'],
+  'hr:update-employee': ['ADMIN', 'MANAGER', 'HR'],
+  'hr:clock-attendance': ['ADMIN', 'MANAGER', 'CASHIER', 'HR'],
+  'hr:get-attendance': ['ADMIN', 'MANAGER', 'CASHIER', 'HR'],
+  'hr:apply-leave': ['ADMIN', 'MANAGER', 'CASHIER', 'HR'],
+  'hr:get-leaves': ['ADMIN', 'MANAGER', 'CASHIER', 'HR'],
+  'hr:approve-leave': ['ADMIN', 'MANAGER', 'HR'],
+  'hr:generate-payroll': ['ADMIN', 'MANAGER', 'ACCOUNTANT', 'HR'],
+  'hr:get-payrolls': ['ADMIN', 'MANAGER', 'ACCOUNTANT', 'HR'],
+
+  // Cashbox & Shifts
+  'cashbox:open-session': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:close-session': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:get-current-session': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:record-transaction': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:record-movement': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:update-open-movement': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:delete-open-movement': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'cashbox:get-transactions': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'cashbox:get-dashboard': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'cashbox:get-shift-history': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'cashbox:get-shift-details': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'cashbox:apply-correction': ['ADMIN', 'MANAGER'],
+  'cashbox:get-shift-transactions': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+
+  // Expenses
+  'expenses:get-categories': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'expenses:create-category': ['ADMIN', 'MANAGER', 'ACCOUNTANT'],
+  'expenses:record-expense': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'expenses:get-expenses': ['ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT'],
+  'expenses:approve-expense': ['ADMIN', 'MANAGER', 'ACCOUNTANT'],
+
+  // Market Prices
+  'market-prices:set-chicken-price': ['ADMIN', 'MANAGER'],
+  'market-prices:get-chicken-prices': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'market-prices:set-egg-price': ['ADMIN', 'MANAGER'],
+  'market-prices:get-egg-prices': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Ledgers & Audit
+  'ledgers:get-entries': ['ADMIN', 'MANAGER', 'ACCOUNTANT'],
+  'audit:get-logs': ['ADMIN', 'MANAGER'],
+
+  // Branches
+  'branches:list': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'branches:get-active': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'branches:create': ['ADMIN', 'MANAGER'],
+  'branches:update': ['ADMIN', 'MANAGER'],
+  'branches:toggle-active': ['ADMIN', 'MANAGER'],
+  'branches:delete': ['ADMIN'],
+
+  // Assets
+  'assets:list': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'assets:get': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'assets:create': ['ADMIN', 'MANAGER'],
+  'assets:update': ['ADMIN', 'MANAGER'],
+  'assets:record-replacement': ['ADMIN', 'MANAGER'],
+  'assets:delete': ['ADMIN'],
+  'assets:get-summary': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Inventory Ledger
+  'inventory-ledger:get-activity-log': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'inventory-ledger:get-valuation-report': ['ADMIN', 'MANAGER', 'CASHIER'],
+
+  // Payments & Receipts Engine
+  'payments-receipts:record': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:get-open-bills': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:record-contra': ['ADMIN', 'MANAGER'],
+  'payments-receipts:get-balances': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:get-voucher': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:get-register': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:get-due-purchases': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:reverse': ['ADMIN', 'MANAGER'],
+  'payments-receipts:get-bill-payment-history': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'payments-receipts:get-outstanding-bills': ['ADMIN', 'MANAGER', 'CASHIER'],
+};
+
+export function checkIPCPermission(channel: string): void {
+  const allowedRoles = ROLE_PERMISSIONS[channel] || ['ADMIN'];
+  
+  if (channel === 'auth:login' || channel === 'auth:get-session' || channel === 'auth:logout') {
+    return;
+  }
+
+  const session = authService.getSession();
+  if (!session) {
+    throw new PermissionError(`Unauthorized: Access to channel '${channel}' requires an active user session`);
+  }
+
+  if (!allowedRoles.includes(session.role)) {
+    throw new PermissionError(`Forbidden: User role '${session.role}' is not authorized to invoke IPC channel '${channel}'`);
+  }
+}

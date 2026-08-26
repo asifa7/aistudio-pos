@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-electron/
+release/
+
+# SQLite databases
+*.db
+*.db-shm
+*.db-wal
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# API keys / local secrets
+api key
+api_key
+apikey
+*.key
+
+# Logs
+*.log
+logs/
+
+# TypeScript build information
+*.tsbuildinfo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.temp

@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "outDir": "dist-electron",
+    "noEmit": false,
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ]
+    }
+  },
+  "include": [
+    "src/electron/**/*.ts",
+    "src/core/**/*.ts",
+    "src/modules/**/backend/**/*.ts",
+    "src/modules/**/shared/**/*.ts"
+  ]
+}

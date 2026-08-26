@@ -1,0 +1,60 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": [
+    "src/main.tsx",
+    "src/App.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "dist-electron",
+    "release",
+    "src/electron/**/*.ts",
+    "src/core/backend/**/*.ts",
+    "src/modules/**/backend/**/*.ts",
+    "src/core/tests/**/*.ts",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "src/core/config/config_service.ts",
+    "src/core/database/**/*.ts",
+    "src/core/jobs/**/*.ts",
+    "src/core/plugins/**/*.ts",
+    "src/core/ipc/ipc_logger.ts",
+    "src/core/ipc/ipc_permissions.ts",
+    "src/core/ipc/ipc_errors.ts",
+    "src/core/ipc/ipc_types.ts",
+    "src/core/di/**/*.ts",
+    "src/core/ipc/ipc_client.ts",
+    "src/core/ipc/ipc_events.ts",
+    "src/core/orchestration/**/*.ts"
+  ]
+}

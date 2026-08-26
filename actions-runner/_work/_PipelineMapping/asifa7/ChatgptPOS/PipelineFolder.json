@@ -1,0 +1,12 @@
+{
+  "repositoryName": "asifa7/ChatgptPOS",
+  "pipelineDirectory": "ChatgptPOS",
+  "workspaceDirectory": "ChatgptPOS\\ChatgptPOS",
+  "repositories": {
+    "asifa7/ChatgptPOS": {
+      "repositoryPath": "ChatgptPOS\\ChatgptPOS",
+      "lastRunOn": "08/15/2026 11:50:50 +05:30"
+    }
+  },
+  "lastRunOn": "08/15/2026 12:23:09 +05:30"
+}

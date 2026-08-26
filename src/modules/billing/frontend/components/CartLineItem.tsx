@@ -1,0 +1,310 @@
+import { useEffect, useState, type KeyboardEvent } from 'react';
+import { Trash2, ShieldAlert, Layers, Snowflake } from 'lucide-react';
+import type { InvoiceItem } from '../types/billing.types';
+import { formatPaise } from '../types/billing.types';
+import { useAppearance } from '../../../../core/theme/AppearanceContext';
+
+interface CartLineItemProps {
+  item: InvoiceItem;
+  index: number;
+  onEditQty: () => void;
+  onIncrementPiece: (delta: number) => void;
+  onSetQuantity: (quantity: number) => void;
+  onRemove: () => void;
+  removing: boolean;
+  isGstInvoice: boolean;
+  onOpenBatchPicker?: () => void;
+  onToggleFridge?: () => void;
+}
+
+export default function CartLineItem({ item, index, onSetQuantity, onRemove, removing, onOpenBatchPicker, onToggleFridge }: CartLineItemProps) {
+  const { config } = useAppearance();
+  const cartMode = config.cartDisplay || 'detailed';
+
+  const isWeight = item.unit_type === 'weight' || item.unit_type === 'live_dual';
+  const quantity = isWeight ? (item.quantity_grams ?? 0) / 1000 : item.quantity_units ?? 0;
+  const amount = item.line_subtotal_paise / 100;
+  const [quantityInput, setQuantityInput] = useState(String(quantity));
+  const [amountInput, setAmountInput] = useState(amount.toFixed(2));
+
+  useEffect(() => {
+    setQuantityInput(String(quantity));
+    setAmountInput(amount.toFixed(2));
+  }, [quantity, amount]);
+
+  const saveQuantity = () => {
+    const entered = Number(quantityInput);
+    if (!Number.isFinite(entered) || entered <= 0) return setQuantityInput(String(quantity));
+    const storedQuantity = isWeight ? Math.round(entered * 1000) : Math.round(entered);
+    if (storedQuantity > 0 && storedQuantity !== (isWeight ? item.quantity_grams : item.quantity_units)) onSetQuantity(storedQuantity);
+  };
+
+  const saveAmount = () => {
+    const entered = Number(amountInput);
+    if (!Number.isFinite(entered) || entered <= 0 || item.rate_paise_snapshot <= 0) return setAmountInput(amount.toFixed(2));
+    const desiredPaise = Math.round(entered * 100);
+    const storedQuantity = isWeight
+      ? Math.round((desiredPaise * 1000) / item.rate_paise_snapshot)
+      : Math.round(desiredPaise / item.rate_paise_snapshot);
+    if (storedQuantity > 0 && storedQuantity !== (isWeight ? item.quantity_grams : item.quantity_units)) onSetQuantity(storedQuantity);
+    else setAmountInput(amount.toFixed(2));
+  };
+
+  const submitOnEnter = (event: KeyboardEvent<HTMLInputElement>, save: () => void) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      save();
+      (event.target as HTMLInputElement).blur();
+      setTimeout(() => {
+        const searchInput = document.getElementById('quick-product-search-input') as HTMLInputElement | null;
+        if (searchInput) {
+          searchInput.focus();
+          searchInput.select();
+        }
+      }, 0);
+    }
+  };
+
+  // 1. Compact View Mode (Ultra-dense single row)
+  if (cartMode === 'compact') {
+    return (
+      <div className={`bg-surface-card border rounded px-2 py-1 flex items-center justify-between gap-1.5 transition-all text-xs ${item.override_applied ? 'border-amber-500/50 bg-amber-950/20' : 'border-border-subtle hover:border-border-subtle/80'}`}>
+        <div className="flex items-center gap-1 min-w-0 flex-1 truncate">
+          <span className="text-[9px] font-mono text-text-muted w-3 flex-shrink-0">{(index + 1)}</span>
+          <span className="font-extrabold text-text-primary truncate text-[11px]">
+            {item.product_name}
+          </span>
+          {item.fulfill_from_fridge && (
+            <span className="text-[8px] font-bold px-1 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-0.5">
+              <Snowflake size={8} /> Fridge
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          {onToggleFridge && (
+            <button
+              type="button"
+              onClick={onToggleFridge}
+              className={`h-6 w-6 rounded flex items-center justify-center transition-colors ${
+                item.fulfill_from_fridge
+                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                  : 'text-text-muted hover:text-cyan-400'
+              }`}
+              title={item.fulfill_from_fridge ? 'Deducting from Refrigerator (Click to toggle off)' : 'Deduct from Refrigerator'}
+            >
+              <Snowflake size={11} />
+            </button>
+          )}
+
+          <input
+            inputMode="decimal"
+            value={quantityInput}
+            onChange={event => setQuantityInput(event.target.value)}
+            onBlur={saveQuantity}
+            onKeyDown={event => submitOnEnter(event, saveQuantity)}
+            className="w-14 h-6 rounded bg-surface-panel border border-border-subtle px-1 text-center text-[11px] font-extrabold font-mono text-text-primary outline-none focus:border-brand-500"
+          />
+          <span className="text-[10px] font-bold text-text-secondary">{isWeight ? 'kg' : 'pc'}</span>
+
+          <span className="text-[10px] font-bold text-text-muted font-mono">@{formatPaise(item.rate_paise_snapshot)}</span>
+
+          <input
+            inputMode="decimal"
+            value={amountInput}
+            onChange={event => setAmountInput(event.target.value)}
+            onBlur={saveAmount}
+            onKeyDown={event => submitOnEnter(event, saveAmount)}
+            className="w-16 h-6 rounded bg-surface-panel border border-border-subtle px-1 text-right text-[11px] font-extrabold font-mono text-brand-500 outline-none focus:border-brand-500"
+          />
+
+          <button
+            onClick={onRemove}
+            disabled={removing}
+            className="h-6 w-6 flex items-center justify-center rounded text-text-muted hover:text-red-400 transition-colors"
+          >
+            <Trash2 size={12} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Comfort View Mode (Standard view)
+  if (cartMode === 'comfort') {
+    return (
+      <div className={`bg-surface-card border rounded-md px-2.5 py-1.5 flex items-center justify-between gap-2 transition-all ${item.override_applied ? 'border-amber-500/50 bg-amber-950/20' : 'border-border-subtle'}`}>
+        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+          <span className="text-[10px] font-bold text-text-muted font-mono">{(index + 1).toString().padStart(2, '0')}</span>
+          <span className="text-xs font-extrabold text-text-primary truncate">{item.product_name}</span>
+          {item.fulfill_from_fridge && (
+            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-1">
+              <Snowflake size={9} /> Fridge
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {onToggleFridge && (
+            <button
+              type="button"
+              onClick={onToggleFridge}
+              className={`h-7 px-1.5 rounded-md border flex items-center justify-center gap-1 text-[10px] font-bold transition-all ${
+                item.fulfill_from_fridge
+                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 font-extrabold'
+                  : 'bg-surface-panel border-border-subtle/80 text-text-muted hover:text-cyan-400 hover:border-cyan-500/50'
+              }`}
+              title={item.fulfill_from_fridge ? 'Sourced from Refrigerator (Click to cancel)' : 'Take from Refrigerator'}
+            >
+              <Snowflake size={12} />
+            </button>
+          )}
+
+          <span className="text-[10px] font-bold font-mono text-text-secondary">
+            @{formatPaise(item.rate_paise_snapshot)}
+          </span>
+
+          <input
+            inputMode="decimal"
+            value={quantityInput}
+            onChange={event => setQuantityInput(event.target.value)}
+            onBlur={saveQuantity}
+            onKeyDown={event => submitOnEnter(event, saveQuantity)}
+            className="w-16 h-7 rounded bg-surface-panel border border-border-subtle px-1.5 text-center text-xs font-extrabold font-mono text-text-primary outline-none focus:border-brand-500"
+          />
+
+          <input
+            inputMode="decimal"
+            value={amountInput}
+            onChange={event => setAmountInput(event.target.value)}
+            onBlur={saveAmount}
+            onKeyDown={event => submitOnEnter(event, saveAmount)}
+            className="w-18 h-7 rounded bg-surface-panel border border-border-subtle px-1.5 text-right text-xs font-extrabold font-mono text-brand-500 outline-none focus:border-brand-500"
+          />
+
+          <button
+            onClick={onRemove}
+            disabled={removing}
+            className="h-7 w-7 flex items-center justify-center rounded text-text-muted hover:text-red-400 transition-colors"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. Detailed View Mode (Default full featured view)
+  return (
+    <div className={`bg-surface-card border rounded-lg px-2.5 py-1.5 flex items-center justify-between gap-2 transition-all duration-150 select-none ${item.override_applied ? 'border-amber-500/50 bg-amber-950/20' : 'border-border-subtle hover:border-border-subtle/80'}`}>
+      {/* Product Info */}
+      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+        <span className="text-[10px] font-bold text-text-muted w-4 font-mono flex-shrink-0">{(index + 1).toString().padStart(2, '0')}</span>
+        <div className="min-w-0 flex-1 truncate flex items-center gap-1">
+          <span className="text-xs font-extrabold text-text-primary truncate">
+            {item.product_name}
+          </span>
+          {item.variant_name && item.variant_name !== 'Default' && (
+            <span className="text-[10px] font-medium text-text-muted truncate">({item.variant_name})</span>
+          )}
+          {item.fulfill_from_fridge && (
+            <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold flex items-center gap-1 flex-shrink-0 animate-in fade-in duration-150">
+              <Snowflake size={10} className="animate-pulse" />
+              <span>Fridge Stock</span>
+            </span>
+          )}
+          {item.override_applied === 1 && (
+            <span title={`Rate Override: ${item.override_reason}`}>
+              <ShieldAlert size={12} className="text-amber-400 flex-shrink-0" />
+            </span>
+          )}
+          {item.manual_batch_allocations && item.manual_batch_allocations.length > 0 && (
+            <span className="px-1.5 py-0.5 rounded bg-brand-500/15 text-brand-400 border border-brand-500/30 text-[9px] font-extrabold flex-shrink-0">
+              Manual Batch ({item.manual_batch_allocations.length})
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Inputs & Controls */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {/* Refrigerator Sourcing Button */}
+        {onToggleFridge && (
+          <button
+            type="button"
+            onClick={onToggleFridge}
+            className={`h-7 px-1.5 rounded-md border flex items-center justify-center gap-1 text-[10.5px] font-bold transition-all ${
+              item.fulfill_from_fridge
+                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 font-extrabold shadow-xs shadow-cyan-500/20'
+                : 'bg-surface-panel border-border-subtle/80 text-text-muted hover:text-cyan-400 hover:border-cyan-500/50'
+            }`}
+            title={item.fulfill_from_fridge ? 'Sourced from Refrigerator (Click to switch back)' : 'Take from Refrigerator (Cold Room)'}
+          >
+            <Snowflake size={13} />
+            {item.fulfill_from_fridge && <span className="text-[9px]">Fridge</span>}
+          </button>
+        )}
+
+        {onOpenBatchPicker && (
+          <button
+            type="button"
+            onClick={onOpenBatchPicker}
+            className={`h-7 px-1.5 rounded-md border flex items-center justify-center gap-1 text-[10.5px] font-bold transition-all ${
+              item.manual_batch_allocations && item.manual_batch_allocations.length > 0
+                ? 'bg-brand-500/20 border-brand-500 text-brand-400 font-extrabold'
+                : 'bg-surface-panel border-border-subtle/80 text-text-muted hover:text-brand-500 hover:border-brand-500/50'
+            }`}
+            title="Select Batch (Manual Batch Drawdown)"
+          >
+            <Layers size={13} />
+          </button>
+        )}
+
+        {/* Unit Rate Indicator Badge */}
+        <span className="text-[10px] font-bold font-mono text-text-secondary bg-surface-panel border border-border-subtle/80 px-2 py-1 rounded-md whitespace-nowrap">
+          @{formatPaise(item.rate_paise_snapshot)}/{isWeight ? 'kg' : 'pc'}
+        </span>
+
+        {/* Quantity Field */}
+        <div className="flex items-center gap-1">
+          <input
+            aria-label={`Quantity for ${item.product_name}`}
+            inputMode="decimal"
+            value={quantityInput}
+            onChange={event => setQuantityInput(event.target.value)}
+            onBlur={saveQuantity}
+            onKeyDown={event => submitOnEnter(event, saveQuantity)}
+            className="w-20 h-7 rounded-md bg-surface-panel border border-border-subtle px-2 text-center text-xs font-extrabold font-mono text-text-primary outline-none focus:border-brand-500 transition-colors"
+            title={`Edit Quantity (${isWeight ? 'kg' : 'pcs'})`}
+          />
+          <span className="text-xs font-extrabold uppercase text-text-secondary w-5">{isWeight ? 'KG' : 'PC'}</span>
+        </div>
+
+        {/* Amount Field */}
+        <div className="flex items-center gap-1">
+          <span className="text-xs font-extrabold text-brand-500">₹</span>
+          <input
+            aria-label={`Amount for ${item.product_name}`}
+            inputMode="decimal"
+            value={amountInput}
+            onChange={event => setAmountInput(event.target.value)}
+            onBlur={saveAmount}
+            onKeyDown={event => submitOnEnter(event, saveAmount)}
+            className="w-20 h-7 rounded-md bg-surface-panel border border-border-subtle px-2 text-right text-xs font-extrabold font-mono text-brand-500 outline-none focus:border-brand-500 transition-colors"
+            title="Edit Total Line Amount"
+          />
+        </div>
+
+        {/* Remove Button */}
+        <button
+          onClick={onRemove}
+          disabled={removing}
+          className="h-7 w-7 flex items-center justify-center rounded-md text-text-muted hover:text-red-400 hover:bg-red-950/30 transition-colors disabled:opacity-40"
+          title="Remove Item"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  );
+}

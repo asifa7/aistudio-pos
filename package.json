@@ -1,0 +1,75 @@
+{
+  "name": "meat-shop-pos",
+  "version": "1.0.0",
+  "description": "Commercial POS Desktop Software for Meat Shops",
+  "main": "dist-electron/src/electron/main.js",
+  "author": "Antigravity",
+  "license": "MIT",
+  "scripts": {
+    "dev:vite": "vite",
+    "build:electron": "tsc -p tsconfig.node.json",
+    "build:web": "vite build",
+    "build": "npm run build:web && npm run build:electron",
+    "dev": "concurrently -k -n \"VITE,ELECTRON\" -c \"cyan,magenta\" \"vite\" \"wait-on tcp:3000 && npm run build:electron && electron .\"",
+    "lint": "tsc -p tsconfig.web.json --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.50.1",
+    "better-sqlite3": "^11.1.2",
+    "lucide-react": "^0.407.0",
+    "pip": "^0.0.1",
+    "python": "^0.0.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.24.1",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "concurrently": "^8.2.2",
+    "electron": "^31.1.0",
+    "electron-builder": "^24.13.3",
+    "electron-rebuild": "^3.2.9",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.2",
+    "vite": "^5.3.1",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.meatshop.pos",
+    "productName": "MeatShopPOS",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "src/core/database/migrations",
+        "to": "migrations"
+      }
+    ],
+    "asar": true,
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Meat Shop POS"
+    }
+  }
+}

@@ -1,0 +1,118 @@
+name: Sync Windows Development PC
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: self-hosted
+
+    steps:
+      - name: Sync local POS repository
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          # ==========================================
+          # REAL POS PROJECT DIRECTORY
+          # ==========================================
+          $project = "E:\pos\claude version1\Chatgpt model"
+
+          if (-not (Test-Path "$project\.git")) {
+              throw "Git repository not found at: $project"
+          }
+
+          Set-Location $project
+
+          Write-Host "=========================================="
+          Write-Host "POS DEVELOPMENT SYNC"
+          Write-Host "=========================================="
+          Write-Host "Project: $project"
+          Write-Host ""
+
+          # ==========================================
+          # VERIFY CURRENT BRANCH
+          # ==========================================
+          $branch = git branch --show-current
+
+          Write-Host "Current branch: $branch"
+
+          if ($branch -ne "main") {
+              throw "Local repository is not on main. Refusing automatic sync."
+          }
+
+          # ==========================================
+          # CHECK LOCAL CHANGES
+          # ==========================================
+          Write-Host ""
+          Write-Host "Checking working tree..."
+
+          $status = git status --porcelain
+
+          if ($status) {
+              Write-Host ""
+              Write-Host "LOCAL CHANGES DETECTED:"
+              git status --short
+              Write-Host ""
+
+              throw "Local changes exist. Refusing to pull automatically."
+          }
+
+          Write-Host "Working tree is clean."
+
+          # ==========================================
+          # FETCH GITHUB
+          # ==========================================
+          Write-Host ""
+          Write-Host "Fetching origin/main..."
+
+          git fetch origin main
+
+          # ==========================================
+          # CHECK FOR LOCAL COMMITS
+          # ==========================================
+          $localOnly = git log --oneline origin/main..main
+
+          if ($localOnly) {
+              Write-Host ""
+              Write-Host "LOCAL COMMITS NOT PRESENT ON GITHUB:"
+              Write-Host $localOnly
+              Write-Host ""
+
+              throw "Local repository contains commits not on origin/main. Refusing automatic sync."
+          }
+
+          # ==========================================
+          # CHECK WHETHER UPDATE IS REQUIRED
+          # ==========================================
+          $behind = git rev-list --count main..origin/main
+
+          Write-Host ""
+          Write-Host "Commits behind GitHub: $behind"
+
+          if ($behind -eq 0) {
+              Write-Host ""
+              Write-Host "Already up to date."
+              exit 0
+          }
+
+          # ==========================================
+          # FAST-FORWARD ONLY PULL
+          # ==========================================
+          Write-Host ""
+          Write-Host "Pulling latest GitHub changes..."
+
+          git pull --ff-only origin main
+
+          # ==========================================
+          # FINAL VERIFICATION
+          # ==========================================
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "SYNC SUCCESSFUL"
+          Write-Host "=========================================="
+
+          git log -1 --oneline
+          git status --short

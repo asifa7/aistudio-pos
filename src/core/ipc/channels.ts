@@ -3,6 +3,13 @@ export const IPC_CHANNELS = {
     GET: 'config:get',
     UPDATE: 'config:update',
   },
+  SETTINGS: {
+    GET_PERMISSIONS: 'settings:get-permissions',
+    UPDATE_PERMISSION: 'settings:update-permission',
+    GET_USERS: 'settings:get-users',
+    SAVE_USER: 'settings:save-user',
+    TOGGLE_USER_ACTIVE: 'settings:toggle-user-active',
+  },
   SYSTEM: {
     GET_INFO: 'system:get-info',
     LOG: 'system:log',

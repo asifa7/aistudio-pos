@@ -39,6 +39,7 @@ import { branchService } from '../modules/inventory/backend/service/branch_servi
 import { assetService } from '../modules/inventory/backend/service/asset_service';
 import { inventoryLedgerService } from '../modules/inventory/backend/service/inventory_ledger_service';
 import { paymentEngineService } from '../modules/ledger/backend/service/payment_engine_service';
+import { rolePermissionsService } from '../modules/settings/backend/role_permissions_service';
 
 
 let mainWindow: BrowserWindow | null = null;
@@ -263,6 +264,27 @@ function registerIpcHandlers() {
 
   secureIpcHandle(IPC_CHANNELS.CONFIG.UPDATE, (_, newConfig) => {
     return handleIPCRequest(() => configManager.update(newConfig));
+  });
+
+  // Settings & Permissions Handlers
+  secureIpcHandle(IPC_CHANNELS.SETTINGS.GET_PERMISSIONS, () => {
+    return handleIPCRequest(() => rolePermissionsService.getPermissions());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.SETTINGS.UPDATE_PERMISSION, (_, args: { role: string; permissionKey: string; allowed: boolean }) => {
+    return handleIPCRequest(() => rolePermissionsService.updatePermission(args.role, args.permissionKey, args.allowed));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.SETTINGS.GET_USERS, () => {
+    return handleIPCRequest(() => rolePermissionsService.getUsers());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.SETTINGS.SAVE_USER, (_, args: any) => {
+    return handleIPCRequest(() => rolePermissionsService.saveUser(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.SETTINGS.TOGGLE_USER_ACTIVE, (_, args: { userId: number; isActive: number }) => {
+    return handleIPCRequest(() => rolePermissionsService.toggleUserActive(args.userId, args.isActive));
   });
 
   // Database Handlers

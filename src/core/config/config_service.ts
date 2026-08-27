@@ -10,52 +10,149 @@ export const FeatureFlagsSchema = z.object({
   enableCRM: z.boolean().default(false),
   enableCloudSync: z.boolean().default(false),
   enableRestaurantMode: z.boolean().default(false),
-  enableMeatMode: z.boolean().default(true), // Default true for Meat Shop POS
+  enableMeatMode: z.boolean().default(true),
   enableManufacturing: z.boolean().default(false),
   enablePharmacy: z.boolean().default(false),
 });
 
+// Shop Info Schema
+export const ShopInfoSchema = z.object({
+  name: z.string().default('Meat Shop POS'),
+  address: z.string().default('123 Main Street'),
+  phone: z.string().default('+91 9999999999'),
+  gstin: z.string().default(''),
+  currencySymbol: z.string().default('₹'),
+});
+
+// Business Identity Schema
+export const BusinessSchema = z.object({
+  logoPath: z.string().default(''),
+  email: z.string().default(''),
+  pan: z.string().default(''),
+  financialYear: z.string().default('2026-2027'),
+});
+
+// Invoice & Billing Numbering Schema
+export const InvoiceSchema = z.object({
+  numberingMode: z.enum(['continuous', 'reset_annual', 'custom']).default('continuous'),
+  prefix: z.string().default('INV-'),
+  startingNumber: z.number().int().min(1).default(1),
+  termsAndConditions: z.string().default('Goods once sold cannot be returned without receipt.'),
+  copiesCount: z.number().int().min(1).max(5).default(1),
+});
+
+// Tax / GST Schema
+export const TaxSchema = z.object({
+  gstEnabled: z.boolean().default(true),
+  pricingMode: z.enum(['inclusive', 'exclusive']).default('exclusive'),
+  defaultGstPercent: z.number().default(5),
+  taxRounding: z.enum(['none', 'nearest', 'up', 'down']).default('nearest'),
+  rates: z.array(z.number()).default([0, 5, 12, 18, 28]),
+});
+
+// Payment Methods Schema
+export const PaymentsSchema = z.object({
+  enabledMethods: z.array(z.enum(['cash', 'card', 'upi', 'bank_transfer', 'credit', 'split'])).default(['cash', 'upi', 'card', 'split']),
+  defaultPaymentMethod: z.enum(['cash', 'card', 'upi', 'credit', 'split']).default('cash'),
+  allowSplit: z.boolean().default(true),
+  allowCredit: z.boolean().default(true),
+});
+
+// Cash Box & Shift Rules Schema
+export const CashboxSchema = z.object({
+  enableShifts: z.boolean().default(true),
+  requireOpeningCash: z.boolean().default(true),
+  requireClosingCashCount: z.boolean().default(true),
+  denominationsEnabled: z.array(z.number()).default([500, 200, 100, 50, 20, 10, 5, 2, 1]),
+  allowWithdrawal: z.boolean().default(true),
+  allowDeposit: z.boolean().default(true),
+  allowAdjustment: z.boolean().default(true),
+  managerApprovalRequired: z.boolean().default(false),
+  discrepancyThresholdPaise: z.number().default(50000), // ₹500
+});
+
+// Inventory Rules Schema
+export const InventorySchema = z.object({
+  trackingEnabled: z.boolean().default(true),
+  allowNegativeStock: z.boolean().default(true),
+  defaultLowStockThreshold: z.number().default(5),
+  alertLowStock: z.boolean().default(true),
+  alertOutOfStock: z.boolean().default(true),
+  valuationMethod: z.enum(['FIFO', 'Weighted_Average']).default('FIFO'),
+  batchTracking: z.boolean().default(true),
+  expiryTracking: z.boolean().default(true),
+  defaultUnit: z.enum(['kg', 'g', 'piece', 'pack']).default('kg'),
+});
+
+// Returns & Refunds Schema
+export const ReturnsSchema = z.object({
+  returnsEnabled: z.boolean().default(true),
+  returnPeriodDays: z.number().default(7),
+  allowPartialReturn: z.boolean().default(true),
+  allowExchange: z.boolean().default(true),
+  refundToOriginal: z.boolean().default(true),
+  cashRefund: z.boolean().default(true),
+  storeCredit: z.boolean().default(true),
+  requireReturnReason: z.boolean().default(true),
+  managerApproval: z.boolean().default(false),
+  autoRestock: z.boolean().default(true),
+});
+
+// Hardware & Peripheral Schema
+export const HardwareSchema = z.object({
+  printerName: z.string().default(''),
+  scalePort: z.string().default(''),
+  scaleBaudRate: z.number().default(9600),
+  barcodeScannerEnabled: z.boolean().default(true),
+  cashDrawerEnabled: z.boolean().default(true),
+});
+
 // Receipt Template Schema
 export const ReceiptTemplateSchema = z.object({
-  paperWidth: z.enum(['58mm', '80mm']).default('80mm'),
+  paperWidth: z.enum(['58mm', '80mm', 'A4']).default('80mm'),
   headerMessage: z.string().default('Fresh Quality Meats Daily'),
   footerMessage: z.string().default('Thank you for your business! Visit again.'),
   showGstBreakdown: z.boolean().default(true),
   autoPrintOnComplete: z.boolean().default(true),
+  showLogo: z.boolean().default(true),
+  showHsn: z.boolean().default(true),
+  showDiscount: z.boolean().default(true),
+  showCashier: z.boolean().default(true),
+  showCustomer: z.boolean().default(true),
 });
 
-// App Config Schema
+// Billing Settings Schema (single source of truth for payment/print flags)
+export const BillingSettingsSchema = z.object({
+  skipPaymentConfirmation: z.boolean().default(false),
+  enableCalculatorWidget: z.boolean().default(true),
+  defaultPaymentMethod: z.enum(['cash', 'upi', 'card', 'split', 'credit']).default('cash'),
+});
+
+// Full App Config Schema
 export const AppConfigSchema = z.object({
   env: z.enum(['development', 'testing', 'production']).default('development'),
   dbPath: z.string(),
-  shopInfo: z.object({
-    name: z.string().default('Meat Shop POS'),
-    address: z.string().default('123 Main Street'),
-    phone: z.string().default('+91 9999999999'),
-    gstin: z.string().default(''),
-    currencySymbol: z.string().default('₹'),
-  }),
+  shopInfo: ShopInfoSchema.default({}),
+  business: BusinessSchema.default({}),
+  invoice: InvoiceSchema.default({}),
+  tax: TaxSchema.default({}),
+  payments: PaymentsSchema.default({}),
+  cashbox: CashboxSchema.default({}),
+  inventory: InventorySchema.default({}),
+  returns: ReturnsSchema.default({}),
   theme: z.enum(['light', 'dark']).default('dark'),
-  taxes: z.object({
-    defaultGstPercent: z.number().default(5), // Default 5% tax
-    cessPercent: z.number().default(0),
-  }),
-  hardware: z.object({
-    printerName: z.string().default(''),
-    scalePort: z.string().default(''),
-    scaleBaudRate: z.number().default(9600),
-    barcodeScannerEnabled: z.boolean().default(true),
-  }),
+  hardware: HardwareSchema.default({}),
   receiptTemplate: ReceiptTemplateSchema.default({}),
+  billingSettings: BillingSettingsSchema.default({}),
   backup: z.object({
     backupDir: z.string().default(''),
     autoBackupOnClose: z.boolean().default(true),
     maxBackupsToKeep: z.number().default(7),
-  }),
+  }).default({}),
   logging: z.object({
     level: z.enum(['DEBUG', 'INFO', 'WARN', 'ERROR']).default('INFO'),
     enableFileLogging: z.boolean().default(true),
-  }),
+  }).default({}),
   featureFlags: FeatureFlagsSchema.default({}),
 });
 
@@ -105,16 +202,73 @@ export class ConfigService implements IConfigService {
         gstin: '29AAAAA0000A1Z5',
         currencySymbol: '₹',
       },
-      theme: 'dark',
-      taxes: {
-        defaultGstPercent: 5,
-        cessPercent: 0,
+      business: {
+        logoPath: '',
+        email: '',
+        pan: '',
+        financialYear: '2026-2027',
       },
+      invoice: {
+        numberingMode: 'continuous',
+        prefix: 'INV-',
+        startingNumber: 1,
+        termsAndConditions: 'Goods once sold cannot be returned without receipt.',
+        copiesCount: 1,
+      },
+      tax: {
+        gstEnabled: true,
+        pricingMode: 'exclusive',
+        defaultGstPercent: 5,
+        taxRounding: 'nearest',
+        rates: [0, 5, 12, 18, 28],
+      },
+      payments: {
+        enabledMethods: ['cash', 'upi', 'card', 'split'],
+        defaultPaymentMethod: 'cash',
+        allowSplit: true,
+        allowCredit: true,
+      },
+      cashbox: {
+        enableShifts: true,
+        requireOpeningCash: true,
+        requireClosingCashCount: true,
+        denominationsEnabled: [500, 200, 100, 50, 20, 10, 5, 2, 1],
+        allowWithdrawal: true,
+        allowDeposit: true,
+        allowAdjustment: true,
+        managerApprovalRequired: false,
+        discrepancyThresholdPaise: 50000,
+      },
+      inventory: {
+        trackingEnabled: true,
+        allowNegativeStock: true,
+        defaultLowStockThreshold: 5,
+        alertLowStock: true,
+        alertOutOfStock: true,
+        valuationMethod: 'FIFO',
+        batchTracking: true,
+        expiryTracking: true,
+        defaultUnit: 'kg',
+      },
+      returns: {
+        returnsEnabled: true,
+        returnPeriodDays: 7,
+        allowPartialReturn: true,
+        allowExchange: true,
+        refundToOriginal: true,
+        cashRefund: true,
+        storeCredit: true,
+        requireReturnReason: true,
+        managerApproval: false,
+        autoRestock: true,
+      },
+      theme: 'dark',
       hardware: {
         printerName: '',
         scalePort: '',
         scaleBaudRate: 9600,
         barcodeScannerEnabled: true,
+        cashDrawerEnabled: true,
       },
       receiptTemplate: {
         paperWidth: '80mm',
@@ -122,6 +276,16 @@ export class ConfigService implements IConfigService {
         footerMessage: 'Thank you for your business! Visit again.',
         showGstBreakdown: true,
         autoPrintOnComplete: true,
+        showLogo: true,
+        showHsn: true,
+        showDiscount: true,
+        showCashier: true,
+        showCustomer: true,
+      },
+      billingSettings: {
+        skipPaymentConfirmation: false,
+        enableCalculatorWidget: true,
+        defaultPaymentMethod: 'cash',
       },
       backup: {
         backupDir: defaultBackupDir,
@@ -154,8 +318,6 @@ export class ConfigService implements IConfigService {
       const fileData = fs.readFileSync(this.configFilePath, 'utf-8');
       const parsedData = JSON.parse(fileData);
       
-      // In development mode, ensure dbPath always points to process.cwd()/dev.db
-      // to prevent stale cached paths from AppData overriding current working directory
       if (env === 'development' || !parsedData.dbPath) {
         parsedData.dbPath = defaultDbPath;
       }
@@ -163,7 +325,7 @@ export class ConfigService implements IConfigService {
       const validated = AppConfigSchema.parse({
         ...defaults,
         ...parsedData,
-        env, // Environment is runtime context-driven
+        env,
       });
 
       this.currentConfig = validated;
@@ -184,23 +346,29 @@ export class ConfigService implements IConfigService {
       const merged = {
         ...this.currentConfig,
         ...newConfig,
-        shopInfo: { ...this.currentConfig.shopInfo, ...newConfig.shopInfo },
-        taxes: { ...this.currentConfig.taxes, ...newConfig.taxes },
-        hardware: { ...this.currentConfig.hardware, ...newConfig.hardware },
-        receiptTemplate: { ...this.currentConfig.receiptTemplate, ...newConfig.receiptTemplate },
-        backup: { ...this.currentConfig.backup, ...newConfig.backup },
-        logging: { ...this.currentConfig.logging, ...newConfig.logging },
-        featureFlags: { ...this.currentConfig.featureFlags, ...newConfig.featureFlags },
+        shopInfo: { ...this.currentConfig.shopInfo, ...(newConfig.shopInfo || {}) },
+        business: { ...(this.currentConfig.business || {}), ...(newConfig.business || {}) },
+        invoice: { ...(this.currentConfig.invoice || {}), ...(newConfig.invoice || {}) },
+        tax: { ...(this.currentConfig.tax || {}), ...(newConfig.tax || {}) },
+        payments: { ...(this.currentConfig.payments || {}), ...(newConfig.payments || {}) },
+        cashbox: { ...(this.currentConfig.cashbox || {}), ...(newConfig.cashbox || {}) },
+        inventory: { ...(this.currentConfig.inventory || {}), ...(newConfig.inventory || {}) },
+        returns: { ...(this.currentConfig.returns || {}), ...(newConfig.returns || {}) },
+        hardware: { ...this.currentConfig.hardware, ...(newConfig.hardware || {}) },
+        receiptTemplate: { ...(this.currentConfig.receiptTemplate || {}), ...(newConfig.receiptTemplate || {}) },
+        billingSettings: { ...(this.currentConfig.billingSettings || {}), ...(newConfig.billingSettings || {}) },
+        backup: { ...this.currentConfig.backup, ...(newConfig.backup || {}) },
+        logging: { ...this.currentConfig.logging, ...(newConfig.logging || {}) },
+        featureFlags: { ...this.currentConfig.featureFlags, ...(newConfig.featureFlags || {}) },
       };
 
-      
       const validated = AppConfigSchema.parse(merged);
       this.currentConfig = validated;
       this.save();
-      logger.info('Configuration updated successfully');
+      logger.info('Application configuration updated successfully');
       return this.currentConfig;
     } catch (err) {
-      logger.error('Failed to update config due to validation error', err);
+      logger.error('Failed to update configuration', err);
       throw err;
     }
   }
@@ -210,9 +378,10 @@ export class ConfigService implements IConfigService {
   }
 
   public toggleFlag(flag: keyof FeatureFlags, enabled: boolean): FeatureFlags {
-    const updatedFlags = { ...this.currentConfig.featureFlags, [flag]: enabled };
-    this.update({ featureFlags: updatedFlags });
-    return this.getFlags();
+    this.currentConfig.featureFlags[flag] = enabled;
+    this.save();
+    logger.info('Feature flag toggled', { flag, enabled });
+    return this.currentConfig.featureFlags;
   }
 
   private save() {
@@ -223,9 +392,11 @@ export class ConfigService implements IConfigService {
       }
       fs.writeFileSync(this.configFilePath, JSON.stringify(this.currentConfig, null, 2), 'utf-8');
     } catch (err) {
-      logger.error('Failed to write configuration file', err);
+      logger.error('Failed to save configuration to file', err);
+      throw err;
     }
   }
 }
 
 export const configService = new ConfigService();
+export default configService;

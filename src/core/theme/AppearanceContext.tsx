@@ -1,69 +1,19 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { AccentColorId, AccentColorOption, ACCENT_COLORS } from './palette';
+
+export type { AccentColorId, AccentColorOption };
+export { ACCENT_COLORS };
 
 export interface AppearanceConfig {
   layoutType: 'classic' | 'touch';
   tileSize: 'small' | 'medium' | 'large';
   cartDisplay: 'detailed' | 'comfort' | 'compact';
   mode: 'light' | 'dark' | 'system';
-  accentColor: 'teal' | 'green' | 'orange' | 'slate';
+  accentColor: AccentColorId;
   skipPaymentConfirmation: boolean;
   showCalculatorWidget: boolean;
   defaultPaymentMethod: 'cash' | 'upi' | 'card';
 }
-
-export interface AccentColorOption {
-  id: 'teal' | 'green' | 'orange' | 'slate';
-  name: string;
-  hex: string;
-  hover: string;
-  active: string;
-  tint50: string;
-  tint100: string;
-  bg: string;
-}
-
-export const ACCENT_COLORS: AccentColorOption[] = [
-  {
-    id: 'teal',
-    name: 'Professional Teal',
-    hex: '#0f766e',
-    hover: '#0d9488',
-    active: '#115e59',
-    tint50: '#f0fdfa',
-    tint100: '#ccfbf1',
-    bg: 'bg-teal-600',
-  },
-  {
-    id: 'green',
-    name: 'Forest Green',
-    hex: '#15803d',
-    hover: '#16a34a',
-    active: '#166534',
-    tint50: '#f0fdf4',
-    tint100: '#dcfce7',
-    bg: 'bg-green-700',
-  },
-  {
-    id: 'orange',
-    name: 'Warm Amber',
-    hex: '#b45309',
-    hover: '#d97706',
-    active: '#92400e',
-    tint50: '#fffbeb',
-    tint100: '#fef3c7',
-    bg: 'bg-amber-700',
-  },
-  {
-    id: 'slate',
-    name: 'Slate',
-    hex: '#475569',
-    hover: '#64748b',
-    active: '#334155',
-    tint50: '#f8fafc',
-    tint100: '#f1f5f9',
-    bg: 'bg-slate-600',
-  },
-];
 
 const DEFAULT_CONFIG: AppearanceConfig = {
   layoutType: 'touch',

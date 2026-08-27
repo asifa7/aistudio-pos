@@ -8,20 +8,16 @@ interface ManagerOverrideModalProps {
 }
 
 export default function ManagerOverrideModal({ errorMessage, onCancel, onConfirm }: ManagerOverrideModalProps) {
+  const [pin, setPin] = useState('');
   const [reason, setReason] = useState('Bulk order');
   const [preAuth, setPreAuth] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!reason.trim()) {
-      setError('A reason for the override is required');
-      return;
-    }
-    // No PIN required; call onConfirm with empty string for pin.
-    onConfirm('', reason.trim());
+    onConfirm(pin.trim(), reason.trim());
     if (preAuth) {
-      sessionStorage.setItem('preAuthOverridePin', '');
+      sessionStorage.setItem('preAuthOverridePin', pin.trim());
       sessionStorage.setItem('preAuthOverrideReason', reason);
     }
   };

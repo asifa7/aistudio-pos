@@ -7,10 +7,15 @@ const ROLE_PERMISSIONS: Record<string, UserRole[]> = {
   // Configs & System
   'config:get': ['ADMIN', 'MANAGER', 'CASHIER'],
   'config:update': ['ADMIN', 'MANAGER'],
+  'settings:get-permissions': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'settings:update-permission': ['ADMIN', 'MANAGER'],
+  'settings:get-users': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'settings:save-user': ['ADMIN', 'MANAGER'],
+  'settings:toggle-user-active': ['ADMIN', 'MANAGER'],
   'system:get-info': ['ADMIN', 'MANAGER', 'CASHIER'],
   'system:log': ['ADMIN', 'MANAGER', 'CASHIER'],
-  'system:backup-database': ['ADMIN'],
-  'system:export-csv': ['ADMIN'],
+  'system:backup-database': ['ADMIN', 'MANAGER'],
+  'system:export-csv': ['ADMIN', 'MANAGER'],
 
   // DB
   'db:health': ['ADMIN', 'MANAGER', 'CASHIER'],

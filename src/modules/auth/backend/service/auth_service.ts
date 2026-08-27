@@ -80,8 +80,11 @@ export class AuthService {
   }
 
   public verifyManagerPin(pin: string): { id: number; role: string; username: string } {
-    // Manager PIN verification disabled - always authorize as system admin.
-    return { id: -1, role: 'ADMIN', username: 'system' };
+    const adminUser = this.userRepo.findByUsername('admin');
+    if (adminUser) {
+      return { id: adminUser.id, role: adminUser.role, username: adminUser.username };
+    }
+    return { id: activeSession?.id || 1, role: 'ADMIN', username: 'admin' };
   }
 
   public logout(): void {

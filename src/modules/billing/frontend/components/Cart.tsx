@@ -224,7 +224,6 @@ export default function Cart({
     cart.items.length,
     onSelectPaymentMethod,
     handleCheckout,
-    overrideShortageMsg,
     pickerTargetItem,
     isSalesReturnOpen,
     customer,

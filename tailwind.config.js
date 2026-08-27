@@ -9,11 +9,11 @@ module.exports = {
     extend: {
       colors: {
         brand: {
-          50: 'var(--brand-50, #f3e8ff)',
-          100: 'var(--brand-100, #e9d5ff)',
-          500: 'var(--brand-500, #8b5cf6)',
-          600: 'var(--brand-600, #7c3aed)',
-          700: 'var(--brand-700, #6d28d9)',
+          50: 'var(--brand-50, #f0fdfa)',
+          100: 'var(--brand-100, #ccfbf1)',
+          500: 'var(--brand-500, #0f766e)',
+          600: 'var(--brand-600, #0d9488)',
+          700: 'var(--brand-700, #115e59)',
         },
         // Dynamic Theme Surface & Text Tokens
         'surface-app': 'var(--color-surface-app)',
@@ -34,6 +34,7 @@ module.exports = {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        outfit: ['Outfit', 'Inter', 'system-ui', 'sans-serif'],
         mono: ['Fira Code', 'Courier New', 'monospace'],
       },
       boxShadow: {

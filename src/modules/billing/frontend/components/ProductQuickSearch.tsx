@@ -40,14 +40,34 @@ export default function ProductQuickSearch({
     };
   }, []);
 
+  const focusQuantityInput = () => {
+    setQuantityInput('');
+    setAmountInput('');
+    setError('');
+    requestAnimationFrame(() => {
+      quantityInputRef.current?.focus();
+      quantityInputRef.current?.select();
+    });
+    setTimeout(() => {
+      quantityInputRef.current?.focus();
+      quantityInputRef.current?.select();
+    }, 50);
+  };
+
   useEffect(() => {
     let t: NodeJS.Timeout | undefined;
     if (selectedVariant) {
       setQuantityInput('');
       setAmountInput('');
       setError('');
-      requestAnimationFrame(() => quantityInputRef.current?.focus());
-      t = setTimeout(() => quantityInputRef.current?.focus(), 50);
+      requestAnimationFrame(() => {
+        quantityInputRef.current?.focus();
+        quantityInputRef.current?.select();
+      });
+      t = setTimeout(() => {
+        quantityInputRef.current?.focus();
+        quantityInputRef.current?.select();
+      }, 50);
     } else {
       requestAnimationFrame(() => productInputRef.current?.focus());
     }
@@ -75,31 +95,40 @@ export default function ProductQuickSearch({
     }
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    const term = searchTerm.trim();
-    if (!term) return;
+    const rawTerm = searchTerm.trim();
+    const cleanTerm = rawTerm.replace(/^#\s*/, '').trim();
+    if (!cleanTerm && !rawTerm) return;
 
     // 1. Try match by direct product_code (e.g. "1", "2", "101", "PRD-01")
-    const matchByCode = quickVariants.find(v => v.product_code?.toLowerCase() === term.toLowerCase());
+    const matchByCode = quickVariants.find(
+      v => v.product_code?.toLowerCase() === cleanTerm.toLowerCase() ||
+           v.product_code?.toLowerCase() === rawTerm.toLowerCase()
+    );
     if (matchByCode) {
       onSelectVariant(matchByCode);
+      focusQuantityInput();
       return;
     }
 
     // 2. Try match by sequential 1-based quick number index
-    const quickNumber = Number(term);
+    const quickNumber = Number(cleanTerm);
     if (Number.isInteger(quickNumber) && quickNumber >= 1 && quickVariants[quickNumber - 1]) {
       onSelectVariant(quickVariants[quickNumber - 1]);
+      focusQuantityInput();
       return;
     }
 
     // 3. Try match by name contains
-    const matchByName = quickVariants.find(v => `${v.product_name} ${v.variant_name}`.toLowerCase().includes(term.toLowerCase()));
+    const matchByName = quickVariants.find(v =>
+      `${v.product_name} ${v.variant_name}`.toLowerCase().includes(cleanTerm.toLowerCase())
+    );
     if (matchByName) {
       onSelectVariant(matchByName);
+      focusQuantityInput();
       return;
     }
 
-    setError(`No product found for code/number "${term}".`);
+    setError(`No product found for code/number "${rawTerm}".`);
   };
 
   const addSelectedProduct = async (source: 'quantity' | 'amount') => {
@@ -196,7 +225,15 @@ export default function ProductQuickSearch({
               inputMode="decimal"
               value={quantityInput}
               onChange={event => setQuantityInput(event.target.value)}
-              onKeyDown={event => event.key === 'Enter' && addSelectedProduct('quantity')}
+              onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  handleEscape();
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addSelectedProduct('quantity');
+                }
+              }}
               placeholder={(selectedVariant.unit_type === 'weight' || selectedVariant.unit_type === 'live_dual') ? 'Quantity in KG (e.g. 1.5)' : 'Quantity in Pieces'}
               className="rounded-lg bg-surface-card border border-border-subtle px-3 py-2 text-xs font-mono text-text-primary outline-none focus:border-brand-500"
             />
@@ -204,7 +241,15 @@ export default function ProductQuickSearch({
               inputMode="decimal"
               value={amountInput}
               onChange={event => setAmountInput(event.target.value)}
-              onKeyDown={event => event.key === 'Enter' && addSelectedProduct('amount')}
+              onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  handleEscape();
+                } else if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addSelectedProduct('amount');
+                }
+              }}
               placeholder="Total Amount in ₹ (e.g. 250)"
               className="rounded-lg bg-surface-card border border-border-subtle px-3 py-2 text-xs font-mono text-text-primary outline-none focus:border-brand-500"
             />

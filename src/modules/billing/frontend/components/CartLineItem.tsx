@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
-import { Trash2, ShieldAlert, Layers, Snowflake } from 'lucide-react';
+import { Trash2, ShieldAlert, Layers } from 'lucide-react';
 import type { InvoiceItem } from '../types/billing.types';
 import { formatPaise } from '../types/billing.types';
 import { useAppearance } from '../../../../core/theme/AppearanceContext';
@@ -14,10 +14,9 @@ interface CartLineItemProps {
   removing: boolean;
   isGstInvoice: boolean;
   onOpenBatchPicker?: () => void;
-  onToggleFridge?: () => void;
 }
 
-export default function CartLineItem({ item, index, onSetQuantity, onRemove, removing, onOpenBatchPicker, onToggleFridge }: CartLineItemProps) {
+export default function CartLineItem({ item, index, onSetQuantity, onRemove, removing, onOpenBatchPicker }: CartLineItemProps) {
   const { config } = useAppearance();
   const cartMode = config.cartDisplay || 'detailed';
 
@@ -74,29 +73,9 @@ export default function CartLineItem({ item, index, onSetQuantity, onRemove, rem
           <span className="font-extrabold text-text-primary truncate text-[11px]">
             {item.product_name}
           </span>
-          {item.fulfill_from_fridge && (
-            <span className="text-[8px] font-bold px-1 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-0.5">
-              <Snowflake size={8} /> Fridge
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {onToggleFridge && (
-            <button
-              type="button"
-              onClick={onToggleFridge}
-              className={`h-6 w-6 rounded flex items-center justify-center transition-colors ${
-                item.fulfill_from_fridge
-                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
-                  : 'text-text-muted hover:text-cyan-400'
-              }`}
-              title={item.fulfill_from_fridge ? 'Deducting from Refrigerator (Click to toggle off)' : 'Deduct from Refrigerator'}
-            >
-              <Snowflake size={11} />
-            </button>
-          )}
-
           <input
             inputMode="decimal"
             value={quantityInput}
@@ -137,29 +116,9 @@ export default function CartLineItem({ item, index, onSetQuantity, onRemove, rem
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
           <span className="text-[10px] font-bold text-text-muted font-mono">{(index + 1).toString().padStart(2, '0')}</span>
           <span className="text-xs font-extrabold text-text-primary truncate">{item.product_name}</span>
-          {item.fulfill_from_fridge && (
-            <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 flex items-center gap-1">
-              <Snowflake size={9} /> Fridge
-            </span>
-          )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {onToggleFridge && (
-            <button
-              type="button"
-              onClick={onToggleFridge}
-              className={`h-7 px-1.5 rounded-md border flex items-center justify-center gap-1 text-[10px] font-bold transition-all ${
-                item.fulfill_from_fridge
-                  ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 font-extrabold'
-                  : 'bg-surface-panel border-border-subtle/80 text-text-muted hover:text-cyan-400 hover:border-cyan-500/50'
-              }`}
-              title={item.fulfill_from_fridge ? 'Sourced from Refrigerator (Click to cancel)' : 'Take from Refrigerator'}
-            >
-              <Snowflake size={12} />
-            </button>
-          )}
-
           <span className="text-[10px] font-bold font-mono text-text-secondary">
             @{formatPaise(item.rate_paise_snapshot)}
           </span>
@@ -207,12 +166,6 @@ export default function CartLineItem({ item, index, onSetQuantity, onRemove, rem
           {item.variant_name && item.variant_name !== 'Default' && (
             <span className="text-[10px] font-medium text-text-muted truncate">({item.variant_name})</span>
           )}
-          {item.fulfill_from_fridge && (
-            <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 text-[9px] font-extrabold flex items-center gap-1 flex-shrink-0 animate-in fade-in duration-150">
-              <Snowflake size={10} className="animate-pulse" />
-              <span>Fridge Stock</span>
-            </span>
-          )}
           {item.override_applied === 1 && (
             <span title={`Rate Override: ${item.override_reason}`}>
               <ShieldAlert size={12} className="text-amber-400 flex-shrink-0" />
@@ -228,23 +181,6 @@ export default function CartLineItem({ item, index, onSetQuantity, onRemove, rem
 
       {/* Inputs & Controls */}
       <div className="flex items-center gap-1.5 flex-shrink-0">
-        {/* Refrigerator Sourcing Button */}
-        {onToggleFridge && (
-          <button
-            type="button"
-            onClick={onToggleFridge}
-            className={`h-7 px-1.5 rounded-md border flex items-center justify-center gap-1 text-[10.5px] font-bold transition-all ${
-              item.fulfill_from_fridge
-                ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 font-extrabold shadow-xs shadow-cyan-500/20'
-                : 'bg-surface-panel border-border-subtle/80 text-text-muted hover:text-cyan-400 hover:border-cyan-500/50'
-            }`}
-            title={item.fulfill_from_fridge ? 'Sourced from Refrigerator (Click to switch back)' : 'Take from Refrigerator (Cold Room)'}
-          >
-            <Snowflake size={13} />
-            {item.fulfill_from_fridge && <span className="text-[9px]">Fridge</span>}
-          </button>
-        )}
-
         {onOpenBatchPicker && (
           <button
             type="button"

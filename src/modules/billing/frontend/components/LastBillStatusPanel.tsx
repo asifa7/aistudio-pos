@@ -72,13 +72,15 @@ export default function LastBillStatusPanel({ variant = 'embedded' }: LastBillSt
     if (!lastCompletedInvoice) return;
     setEditError('');
     try {
-      const usernameToVerify = session?.username || 'admin';
-      const loginRes = await window.api.invoke('auth:login', { username: usernameToVerify, password: editPassword });
-      if (!loginRes.success) {
+      const verifyRes = await window.api.invoke('billing:verify-action-password', { password: editPassword });
+      if (!verifyRes.success || !verifyRes.data) {
         setEditError('Invalid password. Edit authorization failed.');
         return;
       }
-      const reopenRes = await window.api.invoke('billing:reopen-invoice', { invoice_id: lastCompletedInvoice.invoice.id });
+      const reopenRes = await window.api.invoke('billing:reopen-invoice', { 
+        invoice_id: lastCompletedInvoice.invoice.id,
+        password: editPassword,
+      });
       if (reopenRes.success) {
         setShowEditPasswordModal(false);
         setEditPassword('');
@@ -96,9 +98,9 @@ export default function LastBillStatusPanel({ variant = 'embedded' }: LastBillSt
     if (!lastCompletedInvoice) return;
     setVoidError('');
     try {
-      const res = await window.api.invoke('billing:void-invoice', {
+      const res = await window.api.invoke('billing:delete-invoice', {
         invoice_id: lastCompletedInvoice.invoice.id,
-        void_reason: voidReason.trim() || 'Customer requested void / cancellation',
+        reason: voidReason.trim() || 'Customer requested void / cancellation',
       });
       if (res.success) {
         setShowVoidConfirmModal(false);
@@ -109,10 +111,10 @@ export default function LastBillStatusPanel({ variant = 'embedded' }: LastBillSt
         });
         queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
       } else {
-        setVoidError(res.error?.message || 'Failed to void invoice');
+        setVoidError(res.error?.message || 'Failed to delete/void invoice');
       }
     } catch (err: any) {
-      setVoidError(err.message || 'Void operation failed');
+      setVoidError(err.message || 'Delete operation failed');
     }
   };
 

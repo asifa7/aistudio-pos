@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Pause, CheckCircle2, CreditCard, Banknote, Smartphone, SplitSquareVertical, Shield, RotateCcw } from 'lucide-react';
+import { Pause, CheckCircle2, CreditCard, Banknote, Smartphone, SplitSquareVertical, Shield, RotateCcw, Truck } from 'lucide-react';
 import { useCart } from '../hooks/useCart';
 import { formatPaise, calculateLineTax } from '../types/billing.types';
 import CartLineItem from './CartLineItem';
@@ -18,6 +18,9 @@ interface CartProps {
   onSelectPaymentMethod: (method: any) => void;
   skipPaymentConfirmation?: boolean;
   defaultPaymentMethod?: 'cash' | 'upi' | 'card' | 'split';
+  deliveryChargePaise?: number;
+  onOpenDeliveryModal?: () => void;
+  isDeliveryOrder?: boolean;
 }
 
 export default function Cart({
@@ -27,6 +30,9 @@ export default function Cart({
   selectedPaymentMethod,
   onSelectPaymentMethod,
   defaultPaymentMethod = 'cash',
+  deliveryChargePaise = 0,
+  onOpenDeliveryModal,
+  isDeliveryOrder = false,
 }: CartProps) {
   const cart = useCart();
   const {
@@ -64,7 +70,7 @@ export default function Cart({
   const deductionPaise = Math.round((parseFloat(flatDeduction) || 0) * 100);
   const dressingPaise = Math.round((parseFloat(dressingCharge) || 0) * 100);
 
-  const exactTotalPaise = Math.max(0, subtotalPaise - discountPaise - deductionPaise + taxPaise + dressingPaise);
+  const exactTotalPaise = Math.max(0, subtotalPaise - discountPaise - deductionPaise + taxPaise + dressingPaise + (deliveryChargePaise || 0));
   const exactRupees = exactTotalPaise / 100;
   const roundedRupees = Math.round(exactRupees);
   const netTotalPaise = roundedRupees * 100;
@@ -268,10 +274,25 @@ export default function Cart({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {onOpenDeliveryModal && (
+            <button
+              type="button"
+              onClick={onOpenDeliveryModal}
+              className={`text-[10px] font-extrabold px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer ${
+                isDeliveryOrder
+                  ? 'bg-brand-500 text-white shadow-xs'
+                  : 'text-brand-400 bg-brand-500/10 hover:bg-brand-500/20 border border-brand-500/30'
+              }`}
+              title="Mark this bill for home delivery"
+            >
+              <Truck size={11} />
+              <span>{isDeliveryOrder ? 'Delivery (Active)' : 'Mark as Delivery'}</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setIsSalesReturnOpen(true)}
-            className="text-[10px] font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-1 rounded-lg flex items-center gap-1 transition-all"
+            className="text-[10px] font-bold text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
             title="Customer Sales Return"
           >
             <RotateCcw size={11} /> Return Item
@@ -317,7 +338,6 @@ export default function Cart({
               removing={removingId === item.id}
               isGstInvoice={cart.isGstInvoice}
               onOpenBatchPicker={() => setPickerTargetItem(item)}
-              onToggleFridge={() => cart.toggleFulfillFromFridge(item.id)}
             />
           ))
         )}
@@ -403,6 +423,15 @@ export default function Cart({
               <div className="flex justify-between text-amber-400 font-semibold">
                 <span>Dressing Charge</span>
                 <span className="font-mono">+{formatPaise(dressingPaise)}</span>
+              </div>
+            )}
+
+            {deliveryChargePaise > 0 && (
+              <div className="flex justify-between text-purple-400 font-semibold">
+                <span className="flex items-center gap-1">
+                  <Truck size={11} /> Delivery Fee
+                </span>
+                <span className="font-mono">+{formatPaise(deliveryChargePaise)}</span>
               </div>
             )}
 

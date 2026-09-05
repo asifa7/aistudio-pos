@@ -21,6 +21,21 @@ export interface RefrigeratorStockItem {
   batch_number?: string;
 }
 
+export interface FridgeSlipData {
+  action_type: 'IN' | 'OUT';
+  reference_number: string;
+  ledger_id: number;
+  product_name: string;
+  variant_name?: string;
+  product_code?: string;
+  quantity: number;
+  unit: string;
+  reason?: string;
+  created_at: string;
+  user_name: string;
+  batch_number?: string;
+}
+
 export function useRefrigeratorStock(branchId: number = 1) {
   return useQuery<RefrigeratorStockItem[]>({
     queryKey: ['inventory', 'refrigerator-stock', branchId],
@@ -103,22 +118,24 @@ export interface FridgeActivityItem {
   quantity_units: number | null;
   notes: string | null;
   reference_type: string | null;
+  reference_number?: string | null;
   product_name: string;
+  product_code?: string;
   variant_name: string;
   unit_type: 'weight' | 'piece' | 'live_dual';
   user_name: string | null;
 }
 
-export function useFridgeActivityLog(branchId: number = 1, limit: number = 50) {
+export function useFridgeActivityLog(branchId: number = 1, limit: number = 100, date?: string) {
   return useQuery<FridgeActivityItem[]>({
-    queryKey: ['fridge-activity-log', branchId, limit],
+    queryKey: ['fridge-activity-log', branchId, limit, date],
     queryFn: async () => {
-      const res = await window.api.invoke(IPC_CHANNELS.INVENTORY.GET_FRIDGE_ACTIVITY_LOG, { branchId, limit });
+      const res = await window.api.invoke(IPC_CHANNELS.INVENTORY.GET_FRIDGE_ACTIVITY_LOG, { branchId, limit, date });
       if (!res.success) {
         throw new Error(res.error?.message || 'Failed to load refrigerator activity log');
       }
       return res.data || [];
     },
-    refetchInterval: 15000,
+    refetchInterval: date ? false : 15000,
   });
 }

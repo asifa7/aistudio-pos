@@ -37,6 +37,7 @@ export const CreateCustomerSchema = z.object({
   delivery_notes: optionalField(z.string().max(500)),
   group_id: z.number().int().positive().nullable().optional(),
   category: z.enum(['Hotel', 'Restaurant', 'Retail', 'Wholesale', 'Catering', 'Distributor', 'Contract']).default('Retail'),
+  status: z.enum(['active', 'inactive', 'blocked', 'merged']).default('active'),
   credit_allowed: z.union([z.boolean(), z.number()]).transform(val => Boolean(val)).default(false),
   allow_face_recognition: z.union([z.boolean(), z.number()]).transform(val => Boolean(val)).default(false),
   credit_limit_paise: z.number().int().min(0).default(0),
@@ -46,6 +47,13 @@ export const CreateCustomerSchema = z.object({
   preferred_delivery_time: optionalField(z.string().max(100)),
   price_tier: z.enum(['standard', 'wholesale', 'vip']).default('standard'),
   discount_percent: z.number().min(0).max(100).default(0),
+  preferred_cut: optionalField(z.string().max(100)),
+  skin_preference: optionalField(z.string().max(100)),
+  cutting_preference: optionalField(z.string().max(100)),
+  typical_quantity: optionalField(z.string().max(100)),
+  delivery_preference: optionalField(z.string().max(100)),
+  packaging_preference: optionalField(z.string().max(100)),
+  special_instructions: optionalField(z.string().max(1000)),
   notes: optionalField(z.string().max(1000)),
 });
 

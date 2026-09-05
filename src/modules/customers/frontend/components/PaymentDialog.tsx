@@ -101,31 +101,31 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
       <div className="bg-surface-panel border border-border-subtle rounded-xl shadow-2xl max-w-md w-full overflow-hidden text-xs text-text-secondary select-none">
         
         {/* Header */}
-        <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between">
-          <h3 className="text-sm font-bold text-white">Record Customer Payment</h3>
-          <button onClick={onClose} className="p-1.5 hover:bg-surface-app/40 rounded-full text-text-secondary hover:text-white transition-colors">
+        <div className="px-6 py-4 border-b border-border-subtle flex items-center justify-between bg-surface-card/60">
+          <h3 className="text-sm font-bold text-text-primary">Record Customer Payment</h3>
+          <button onClick={onClose} className="p-1.5 hover:bg-surface-hover rounded-full text-text-secondary hover:text-text-primary transition-colors">
             <X size={16} />
           </button>
         </div>
 
         <form onSubmit={handleSave} className="p-6 space-y-4">
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2.5 text-red-400 font-medium">
+            <div className="bg-red-100 dark:bg-red-500/10 border border-red-300 dark:border-red-500/30 rounded-lg p-2.5 text-red-800 dark:text-red-400 font-medium">
               {error}
             </div>
           )}
 
           {/* Quick Balance Cards */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
-              <p className="text-[10px] text-text-secondary">Outstanding Balance</p>
-              <p className="text-sm font-mono font-bold text-red-400 mt-0.5">
+            <div className="bg-red-50 dark:bg-red-500/10 border border-red-300 dark:border-red-500/20 rounded-lg p-3 shadow-sm">
+              <p className="text-[10px] text-text-secondary font-medium">Outstanding Balance</p>
+              <p className="text-sm font-mono font-bold text-red-600 dark:text-red-400 mt-0.5">
                 {formatPaise(customer.outstanding_balance_paise)}
               </p>
             </div>
-            <div className="bg-brand-500/10 border border-brand-500/20 rounded-lg p-3">
-              <p className="text-[10px] text-text-secondary">Advance Balance</p>
-              <p className="text-sm font-mono font-bold text-brand-500 mt-0.5">
+            <div className="bg-brand-50 dark:bg-brand-500/10 border border-brand-300 dark:border-brand-500/20 rounded-lg p-3 shadow-sm">
+              <p className="text-[10px] text-text-secondary font-medium">Advance Balance</p>
+              <p className="text-sm font-mono font-bold text-brand-600 dark:text-brand-400 mt-0.5">
                 {formatPaise(customer.advance_balance_paise)}
               </p>
             </div>
@@ -133,20 +133,20 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
 
           {/* Amount field */}
           <div>
-            <label className="block text-text-secondary mb-1">Payment Amount (₹) *</label>
+            <label className="block text-text-secondary font-bold mb-1">Payment Amount (₹) *</label>
             <div className="relative">
               <input
                 type="number"
                 value={amountRupees}
                 onChange={(e) => setAmountRupees(e.target.value)}
-                className="w-full bg-surface-app border border-border-subtle rounded-lg pl-8 pr-4 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-accent"
+                className="w-full bg-surface-card border border-border-subtle rounded-lg pl-8 pr-4 py-2.5 text-sm text-text-primary font-mono font-bold focus:outline-none focus:border-brand-500 shadow-sm"
                 placeholder="0.00"
                 min="0.01"
                 step="0.01"
                 required
                 autoFocus
               />
-              <span className="absolute left-3 top-3 text-white font-mono">₹</span>
+              <span className="absolute left-3 top-2.5 text-text-muted font-mono font-bold">₹</span>
             </div>
 
             {/* Quick Presets */}
@@ -156,7 +156,7 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
                   key={val}
                   type="button"
                   onClick={() => handlePreset(val)}
-                  className="flex-1 bg-surface-app border border-border-subtle hover:border-white hover:text-white rounded-md py-1 text-[10px] font-mono transition-colors"
+                  className="flex-1 bg-surface-card border border-border-subtle hover:border-brand-500 hover:text-text-primary text-text-secondary rounded-md py-1 text-[10px] font-mono font-medium transition-colors shadow-sm"
                 >
                   ₹{val}
                 </button>
@@ -165,7 +165,7 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
                 <button
                   type="button"
                   onClick={() => handlePreset(outstandingRupees)}
-                  className="flex-1 bg-accent/20 border border-accent text-accent rounded-md py-1 text-[10px] font-bold transition-colors"
+                  className="flex-1 bg-brand-500/20 border border-brand-500 text-brand-700 dark:text-brand-300 rounded-md py-1 text-[10px] font-bold transition-colors shadow-sm"
                 >
                   Full Amount
                 </button>
@@ -175,17 +175,17 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
 
           {/* Method tabs */}
           <div>
-            <label className="block text-text-secondary mb-1.5">Payment Method</label>
-            <div className="grid grid-cols-5 gap-1 bg-surface-app p-1 rounded-lg">
+            <label className="block text-text-secondary font-bold mb-1.5">Payment Method</label>
+            <div className="grid grid-cols-5 gap-1 bg-surface-card border border-border-subtle p-1 rounded-lg">
               {methods.map((m) => (
                 <button
                   key={m.key}
                   type="button"
                   onClick={() => setMethod(m.key)}
-                  className={`flex flex-col items-center justify-center py-2 gap-1 rounded-md text-[9px] font-semibold transition-all border ${
+                  className={`flex flex-col items-center justify-center py-2 gap-1 rounded-md text-[9px] font-bold transition-all border ${
                     method === m.key
-                      ? 'bg-surface-panel border-border-subtle text-accent shadow-md'
-                      : 'border-transparent text-text-secondary hover:text-white'
+                      ? 'bg-brand-500/15 border-brand-500 text-brand-700 dark:text-brand-300 shadow-sm'
+                      : 'border-transparent text-text-secondary hover:text-text-primary'
                   }`}
                 >
                   {m.icon}
@@ -198,45 +198,45 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
           {/* Dynamic Details Fields */}
           {method !== 'cash' && method !== 'cheque' && (
             <div>
-              <label className="block text-text-secondary mb-1">Reference Number</label>
+              <label className="block text-text-secondary font-bold mb-1">Reference Number</label>
               <input
                 type="text"
                 value={reference}
                 onChange={(e) => setReference(e.target.value)}
-                className="w-full bg-surface-app border border-border-subtle rounded-lg px-3 py-2 text-white placeholder:text-text-secondary focus:outline-none focus:border-accent"
+                className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-text-primary font-mono placeholder:text-text-muted focus:outline-none focus:border-brand-500 shadow-sm"
                 placeholder="UPI txn hash or card approval ID"
               />
             </div>
           )}
 
           {method === 'cheque' && (
-            <div className="grid grid-cols-2 gap-3 bg-surface-app/30 border border-border-subtle p-3 rounded-lg">
+            <div className="grid grid-cols-2 gap-3 bg-surface-card border border-border-subtle p-3 rounded-lg shadow-sm">
               <div>
-                <label className="block text-[10px] text-text-secondary mb-0.5">Cheque Number</label>
+                <label className="block text-[10px] text-text-secondary font-bold mb-0.5">Cheque Number</label>
                 <input
                   type="text"
                   value={chequeNo}
                   onChange={(e) => setChequeNo(e.target.value)}
-                  className="w-full bg-surface-app border border-border-subtle rounded px-2 py-1 text-white"
+                  className="w-full bg-surface-panel border border-border-subtle rounded px-2 py-1 text-text-primary font-mono text-xs"
                   placeholder="e.g. 123456"
                 />
               </div>
               <div>
-                <label className="block text-[10px] text-text-secondary mb-0.5">Cheque Date</label>
+                <label className="block text-[10px] text-text-secondary font-bold mb-0.5">Cheque Date</label>
                 <input
                   type="date"
                   value={chequeDate}
                   onChange={(e) => setChequeDate(e.target.value)}
-                  className="w-full bg-surface-app border border-border-subtle rounded px-2 py-1 text-white"
+                  className="w-full bg-surface-panel border border-border-subtle rounded px-2 py-1 text-text-primary font-mono text-xs"
                 />
               </div>
               <div className="col-span-2">
-                <label className="block text-[10px] text-text-secondary mb-0.5">Bank Name</label>
+                <label className="block text-[10px] text-text-secondary font-bold mb-0.5">Bank Name</label>
                 <input
                   type="text"
                   value={bankName}
                   onChange={(e) => setBankName(e.target.value)}
-                  className="w-full bg-surface-app border border-border-subtle rounded px-2 py-1 text-white"
+                  className="w-full bg-surface-panel border border-border-subtle rounded px-2 py-1 text-text-primary text-xs"
                   placeholder="e.g. State Bank of India"
                 />
               </div>
@@ -245,18 +245,18 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
 
           {/* Notes */}
           <div>
-            <label className="block text-text-secondary mb-1">Remarks / Internal Notes</label>
+            <label className="block text-text-secondary font-bold mb-1">Remarks / Internal Notes</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full bg-surface-app border border-border-subtle rounded-lg px-3 py-2 text-white h-16 focus:outline-none focus:border-accent"
+              className="w-full bg-surface-card border border-border-subtle rounded-lg px-3 py-2 text-text-primary h-16 focus:outline-none focus:border-brand-500 shadow-sm"
               placeholder="Cheque details, clearing date comments..."
             />
           </div>
 
           {/* Excess warning info box */}
           {excessPaise > 0 && (
-            <div className="bg-brand-500/10 border border-brand-500/30 rounded-lg p-3 text-brand-500 text-[10px]">
+            <div className="bg-brand-50 dark:bg-brand-500/10 border border-brand-300 dark:border-brand-500/30 rounded-lg p-3 text-brand-800 dark:text-brand-300 text-[10px] shadow-sm">
               <strong>Note:</strong> Overpayment of <strong>{formatPaise(excessPaise)}</strong> will be credited to this customer's Advance Deposit balance and auto-applied on future credit sales invoices.
             </div>
           )}
@@ -266,14 +266,14 @@ export default function PaymentDialog({ isOpen, onClose, customer }: PaymentDial
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 border border-border-subtle hover:border-white rounded-lg text-white font-semibold transition-colors"
+              className="flex-1 py-2.5 border border-border-subtle hover:border-brand-500 rounded-lg text-text-secondary hover:text-text-primary font-semibold transition-colors bg-surface-card"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 py-2.5 bg-accent hover:bg-brand-500 rounded-lg text-white font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+              className="flex-1 py-2.5 bg-brand-500 hover:bg-brand-400 rounded-lg text-white font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 shadow-sm"
             >
               <Check size={14} />
               {isSubmitting ? 'Recording...' : 'Record Payment'}

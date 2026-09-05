@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { X, LogOut, AlertCircle } from 'lucide-react';
-import { RefrigeratorStockItem, useRecordFridgeRemoval } from '../hooks/useRefrigeratorStock';
+import { X, LogOut, AlertCircle, Printer } from 'lucide-react';
+import { RefrigeratorStockItem, useRecordFridgeRemoval, FridgeSlipData } from '../hooks/useRefrigeratorStock';
 
 interface FridgeTakeOutModalProps {
   item: RefrigeratorStockItem | null;
   onClose: () => void;
+  onSuccess?: (slip: FridgeSlipData) => void;
 }
 
-export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModalProps) {
+export default function FridgeTakeOutModal({ item, onClose, onSuccess }: FridgeTakeOutModalProps) {
   const [quantity, setQuantity] = useState<string>('');
   const [reason, setReason] = useState<string>('Moved to Kitchen Prep');
   const [customReason, setCustomReason] = useState<string>('');
@@ -20,8 +21,7 @@ export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModal
   const isWeight = item.unit_type === 'weight' || item.unit_type === 'live_dual';
   const unitLabel = isWeight ? 'kg' : 'pcs';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleExecuteTakeOut = async (shouldPrint: boolean) => {
     setError(null);
 
     const qtyNum = parseFloat(quantity);
@@ -38,17 +38,27 @@ export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModal
     const finalReason = reason === 'Other' ? customReason.trim() || 'Manual Removal' : reason;
 
     try {
-      await removeMutation.mutateAsync({
+      const res: any = await removeMutation.mutateAsync({
         batch_id: item.oldest_batch_id || item.batch_id || undefined,
         product_variant_id: item.product_variant_id,
         quantity: qtyNum,
         unit_type: item.unit_type,
         reason: finalReason,
       });
-      onClose();
+
+      if (shouldPrint && res?.slip && onSuccess) {
+        onSuccess(res.slip);
+      } else {
+        onClose();
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to remove stock');
     }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    handleExecuteTakeOut(false);
   };
 
   return (
@@ -61,7 +71,7 @@ export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModal
           </div>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-surface-hover rounded-lg text-text-muted hover:text-text-primary"
+            className="p-1 hover:bg-surface-hover rounded-lg text-text-muted hover:text-text-primary cursor-pointer"
           >
             <X size={16} />
           </button>
@@ -102,7 +112,7 @@ export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModal
               <button
                 type="button"
                 onClick={() => setQuantity(String(item.quantity))}
-                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-card hover:bg-surface-hover text-text-secondary border border-border-subtle rounded text-[10px] font-bold"
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-2 py-1 bg-surface-card hover:bg-surface-hover text-text-secondary border border-border-subtle rounded text-[10px] font-bold cursor-pointer"
               >
                 All
               </button>
@@ -116,7 +126,7 @@ export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModal
             <select
               value={reason}
               onChange={e => setReason(e.target.value)}
-              className="w-full bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-xs text-text-primary outline-none focus:border-brand-500 mb-2"
+              className="w-full bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-xs text-text-primary outline-none focus:border-brand-500 mb-2 cursor-pointer"
             >
               <option value="Moved to Kitchen Prep">Moved to Kitchen Prep</option>
               <option value="Direct Counter Sale">Direct Counter Sale</option>
@@ -144,20 +154,29 @@ export default function FridgeTakeOutModal({ item, onClose }: FridgeTakeOutModal
             </div>
           )}
 
-          <div className="flex gap-3 pt-2">
+          <div className="flex gap-2 pt-2">
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border border-border-subtle text-xs font-bold text-text-secondary hover:bg-surface-hover"
+              className="px-3 py-2.5 rounded-xl border border-border-subtle text-xs font-bold text-text-secondary hover:bg-surface-hover cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={removeMutation.isPending || !quantity}
-              className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-all disabled:opacity-50"
+              className="flex-1 py-2.5 rounded-xl bg-surface-panel hover:bg-surface-hover text-rose-400 hover:text-rose-300 border border-rose-500/30 text-xs font-bold transition-all disabled:opacity-50 cursor-pointer"
             >
               {removeMutation.isPending ? 'Removing...' : 'Confirm Take Out'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExecuteTakeOut(true)}
+              disabled={removeMutation.isPending || !quantity}
+              className="flex-1 py-2.5 rounded-xl bg-rose-500 hover:bg-rose-600 text-white text-xs font-bold transition-all disabled:opacity-50 flex items-center justify-center gap-1.5 shadow-md shadow-rose-500/20 cursor-pointer"
+            >
+              <Printer size={13} />
+              <span>Take Out & Print Slip</span>
             </button>
           </div>
         </form>

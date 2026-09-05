@@ -19,6 +19,8 @@ export interface InvoiceConfig {
   startingNumber?: number;
   termsAndConditions?: string;
   copiesCount?: number;
+  editDeletePassword?: string;
+  editDeletePasswordHash?: string;
 }
 
 export interface TaxConfig {

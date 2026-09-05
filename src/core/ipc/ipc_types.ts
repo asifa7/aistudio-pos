@@ -224,6 +224,9 @@ export interface IPCRequestMap {
   'billing:list-held': void;
   'billing:delete-draft': { invoiceId: number };
   'billing:print-receipt': { invoiceId: number; silent?: boolean };
+  'billing:reopen-invoice': { invoice_id: number; password?: string };
+  'billing:delete-invoice': { invoice_id: number; reason: string; password?: string };
+  'billing:verify-action-password': { password: string };
 
   'inventory:get-stock': void;
   'inventory:adjust-stock': { product_variant_id: number; adjustment_type: 'stock_in' | 'stock_out' | 'wastage' | 'damage'; quantity_grams: number | null; quantity_units: number | null; reason: string };
@@ -286,6 +289,9 @@ export interface IPCResponseMap {
   'billing:list-held': Invoice[];
   'billing:delete-draft': void;
   'billing:print-receipt': { success: boolean };
+  'billing:reopen-invoice': InvoiceDetail;
+  'billing:delete-invoice': { success: boolean; invoice_id: number };
+  'billing:verify-action-password': boolean;
 
   'inventory:get-stock': StockStatusRow[];
   'inventory:adjust-stock': void;

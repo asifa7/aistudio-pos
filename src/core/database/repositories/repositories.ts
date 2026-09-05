@@ -295,7 +295,12 @@ export class InvoiceRepository implements IInvoiceRepository {
         )
       `);
     }
-    const result = this.createStmt.run(input);
+    const result = this.createStmt.run({
+      created_by: input.created_by,
+      is_gst_invoice: input.is_gst_invoice ? 1 : 0,
+      gst_number_snapshot: input.gst_number_snapshot ?? null,
+      customer_id: input.customer_id ?? null,
+    });
     const row = this.db.prepare('SELECT * FROM invoices WHERE id = ?').get(result.lastInsertRowid) as Invoice | undefined;
     if (!row) throw new Error('Failed to create invoice');
     return row;
@@ -306,10 +311,10 @@ export class InvoiceRepository implements IInvoiceRepository {
       this.findByIdStmt = this.db.prepare('SELECT * FROM invoices WHERE id = ?');
     }
     const invoice = this.findByIdStmt.get(id) as Invoice | undefined;
-    if (!invoice) throw new NotFoundError(`Invoice with id ${id} not found`);
+    if (!invoice) throw new Error(`Invoice #${id} not found`);
 
-    const items = this.findItemsByInvoiceId(id);
-    const payments = this.findPaymentsByInvoiceId(id);
+    const items = this.db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id) as InvoiceItem[];
+    const payments = this.db.prepare('SELECT * FROM payments WHERE invoice_id = ?').all(id) as any[];
 
     return { invoice, items, payments };
   }
@@ -343,23 +348,26 @@ export class InvoiceRepository implements IInvoiceRepository {
           flat_deduction_paise = @flat_deduction_paise,
           dressing_charge_paise = @dressing_charge_paise,
           round_off_paise = @round_off_paise,
-          narration = @narration,
           print_delivery_token = @print_delivery_token,
+          narration = @narration,
           shop_name_snapshot = @shop_name_snapshot,
           shop_address_snapshot = @shop_address_snapshot,
           completed_at = CURRENT_TIMESTAMP
         WHERE id = @id
       `);
     }
+
     this.completeInvoiceStmt.run({
+      ...update,
       id,
       discount_percent: update.discount_percent ?? 0,
       flat_deduction_paise: update.flat_deduction_paise ?? 0,
       dressing_charge_paise: update.dressing_charge_paise ?? 0,
       round_off_paise: update.round_off_paise ?? 0,
       narration: update.narration ?? null,
-      print_delivery_token: update.print_delivery_token ?? 0,
-      ...update
+      print_delivery_token: update.print_delivery_token ? 1 : 0,
+      discount_reason: update.discount_reason ?? null,
+      discount_applied_by: update.discount_applied_by ?? null,
     });
   }
 
@@ -425,7 +433,19 @@ export class InvoiceRepository implements IInvoiceRepository {
         )
       `);
     }
-    const result = this.addItemStmt.run(item);
+    const result = this.addItemStmt.run({
+      invoice_id: item.invoice_id,
+      product_variant_id: item.product_variant_id,
+      quantity_grams: item.quantity_grams ?? null,
+      quantity_units: item.quantity_units ?? null,
+      rate_paise_snapshot: item.rate_paise_snapshot,
+      line_subtotal_paise: item.line_subtotal_paise,
+      gst_rate_percent_snapshot: item.gst_rate_percent_snapshot ?? null,
+      line_total_paise: item.line_total_paise,
+      override_applied: item.override_applied ? 1 : 0,
+      override_reason: item.override_reason ?? null,
+      overridden_by: item.overridden_by ?? null,
+    });
     const created = this.db.prepare('SELECT * FROM invoice_items WHERE id = ?').get(result.lastInsertRowid) as InvoiceItem | undefined;
     if (!created) throw new Error('Failed to create invoice item');
     return created;

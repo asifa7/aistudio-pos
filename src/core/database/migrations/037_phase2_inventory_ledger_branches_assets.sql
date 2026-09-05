@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS inventory_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     product_variant_id INTEGER NOT NULL,
     branch_id INTEGER NOT NULL DEFAULT 1,
-    action_type TEXT NOT NULL CHECK(action_type IN ('purchase', 'sale', 'return', 'transfer_out', 'transfer_in', 'yield_in', 'yield_out', 'audit_adjustment', 'wastage')),
+    action_type TEXT NOT NULL CHECK(action_type IN ('purchase', 'sale', 'return', 'transfer_out', 'transfer_in', 'yield_in', 'yield_out', 'audit_adjustment', 'wastage', 'fridge_deposit', 'fridge_removal')),
     quantity_grams INTEGER,
     quantity_units INTEGER,
     running_balance_grams INTEGER,

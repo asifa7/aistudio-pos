@@ -21,6 +21,9 @@
     "src/electron/**/*.ts",
     "src/core/**/*.ts",
     "src/modules/**/backend/**/*.ts",
-    "src/modules/**/shared/**/*.ts"
+    "src/modules/**/shared/**/*.ts",
+    "src/modules/**/types/**/*.ts",
+    "src/modules/**/types/*.ts",
+    "src/modules/**/types.ts"
   ]
 }

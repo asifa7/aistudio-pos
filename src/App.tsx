@@ -40,13 +40,16 @@ import WeightEntry from './modules/billing/frontend/components/WeightEntry';
 import PaymentPanel from './modules/billing/frontend/components/PaymentPanel';
 import HeldBillsList from './modules/billing/frontend/components/HeldBillsList';
 import OverrideDialog from './modules/billing/frontend/components/OverrideDialog';
+import UpiCustomerPromptModal from './modules/billing/frontend/components/UpiCustomerPromptModal';
 import { useLowStockAlerts, useOversoldRecords } from './modules/inventory/frontend/hooks/useInventory';
 import CustomerSearch from './modules/customers/frontend/components/CustomerSearch';
 import ReprintLookupModal from './modules/billing/frontend/components/ReprintLookupModal';
-import { useCustomer } from './modules/customers/frontend/hooks/useCustomers';
+import CustomerOutstandingHistoryPanel from './modules/billing/frontend/components/CustomerOutstandingHistoryPanel';
+import { useCustomer, useCustomerIntelligence } from './modules/customers/frontend/hooks/useCustomers';
 import type { Customer } from './modules/customers/frontend/types/customer.types';
+import { getSegmentBadgeStyle } from './modules/customers/frontend/types/customer.types';
 import SettingsScreen from './modules/settings/frontend/components/SettingsScreen';
-import { Key, AlertTriangle, Edit3, Trash2, CheckCircle2, Palette, Zap } from 'lucide-react';
+import { Key, AlertTriangle, Edit3, Trash2, CheckCircle2, Palette, Zap, Sparkles, Plus } from 'lucide-react';
 import { useSession, useLogout } from './modules/auth/frontend/hooks/useAuth';
 import LoginScreen from './modules/auth/frontend/components/LoginScreen';
 import { useCart } from './modules/billing/frontend/hooks/useCart';
@@ -72,8 +75,11 @@ import SystemHealthView from './modules/system/frontend/components/SystemHealthV
 import DemandForecastingView from './modules/inventory/frontend/components/DemandForecastingView';
 import MeatProcessingYieldView from './modules/production/frontend/components/MeatProcessingYieldView';
 import PaymentsReceiptsView from './modules/ledger/frontend/components/PaymentsReceiptsView';
+import DeliveryManagementView from './modules/delivery/frontend/components/DeliveryManagementView';
+import DeliveryOrderModal from './modules/delivery/frontend/components/DeliveryOrderModal';
+import type { CreateDeliveryInput } from './modules/delivery/types/delivery.types';
 
-type Page = 'billing' | 'inventory' | 'purchases' | 'payments' | 'products' | 'reports' | 'settings' | 'help' | 'customers' | 'ar_reports' | 'hr' | 'cashbox' | 'expenses' | 'prices' | 'ledgers' | 'yield' | 'health' | 'forecasting';
+type Page = 'billing' | 'inventory' | 'purchases' | 'payments' | 'delivery' | 'products' | 'reports' | 'settings' | 'help' | 'customers' | 'ar_reports' | 'hr' | 'cashbox' | 'expenses' | 'prices' | 'ledgers' | 'yield' | 'health' | 'forecasting';
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 function Sidebar({ activePage, onNavigate, theme, onToggleTheme }: {
@@ -141,6 +147,18 @@ function Sidebar({ activePage, onNavigate, theme, onToggleTheme }: {
           </button>
 
           <button
+            onClick={() => onNavigate('delivery')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
+              activePage === 'delivery'
+                ? 'bg-brand-500 text-white shadow-subtle'
+                : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
+            }`}
+          >
+            <Truck size={15} className="shrink-0" />
+            <span className="flex-1 text-left truncate">Delivery & Dispatch</span>
+          </button>
+
+          <button
             onClick={() => onNavigate('purchases')}
             className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150 whitespace-nowrap ${
               activePage === 'purchases'
@@ -148,7 +166,7 @@ function Sidebar({ activePage, onNavigate, theme, onToggleTheme }: {
                 : 'text-text-secondary hover:bg-surface-hover hover:text-text-primary'
             }`}
           >
-            <Truck size={15} className="shrink-0" />
+            <Package size={15} className="shrink-0" />
             <span className="flex-1 text-left truncate">Purchases</span>
           </button>
 
@@ -469,8 +487,17 @@ function BillingView() {
   const [showReprintChoiceModal, setShowReprintChoiceModal] = useState(false);
   const [showReprintLookupModal, setShowReprintLookupModal] = useState(false);
 
+  // UPI Customer Prompt Modal (Phase 3 Billing-Time Identification)
+  const [showUpiPrompt, setShowUpiPrompt] = useState(false);
+  const [pendingUpiPayment, setPendingUpiPayment] = useState<{
+    method: 'cash' | 'upi' | 'card' | 'credit' | 'split';
+    amountPaise: number;
+    referenceNumber?: string | null;
+  } | null>(null);
+
   const customerId = cart.activeInvoice?.customer_id ?? null;
   const { data: customer } = useCustomer(customerId);
+  const { data: customerIntelligence } = useCustomerIntelligence(customerId);
 
   const focusEnterBillBar = useCallback(() => {
     const doFocus = () => {
@@ -639,6 +666,21 @@ function BillingView() {
     setTimeout(focusEnterBillBar, 50);
   };
 
+  const handleAddUsualOrder = async () => {
+    if (!customerIntelligence?.typical_basket || customerIntelligence.typical_basket.length === 0) return;
+    if (!cart.activeInvoiceId) {
+      await cart.createDraft();
+    }
+    for (const item of customerIntelligence.typical_basket) {
+      await cart.addItem({
+        product_variant_id: item.product_variant_id,
+        quantity_grams: item.typical_quantity_grams,
+        quantity_units: item.typical_quantity_units,
+      });
+    }
+    setTimeout(focusEnterBillBar, 50);
+  };
+
   const handleWeightConfirm = async (grams: number) => {
     await cart.updateItemQuantity(weightEntryMeta.itemId, grams, null);
     setShowWeightEntry(false);
@@ -671,12 +713,40 @@ function BillingView() {
   };
 
   const handleRecordPayment = async (method: 'cash' | 'upi' | 'card' | 'credit' | 'split', amountPaise: number, referenceNumber?: string | null) => {
+    if (method === 'upi' && !customerId) {
+      setPendingUpiPayment({ method, amountPaise, referenceNumber });
+      setShowUpiPrompt(true);
+      return;
+    }
     if (method !== 'credit') {
       await cart.recordPayment(method as any, amountPaise, referenceNumber);
     }
   };
 
+  const handleUpiPromptSelectCustomer = async (cust: Customer) => {
+    await cart.linkCustomer(cust.id);
+    setShowUpiPrompt(false);
+    if (pendingUpiPayment) {
+      await cart.recordPayment(pendingUpiPayment.method as any, pendingUpiPayment.amountPaise, pendingUpiPayment.referenceNumber);
+      setPendingUpiPayment(null);
+      await handleComplete();
+    }
+  };
+
+  const handleUpiPromptSkip = async () => {
+    setShowUpiPrompt(false);
+    if (pendingUpiPayment) {
+      await cart.recordPayment(pendingUpiPayment.method as any, pendingUpiPayment.amountPaise, pendingUpiPayment.referenceNumber);
+      setPendingUpiPayment(null);
+      await handleComplete();
+    }
+  };
+
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isDeliveryOrder, setIsDeliveryOrder] = useState(false);
+  const [deliveryConfig, setDeliveryConfig] = useState<CreateDeliveryInput | null>(null);
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [flowBDeliveryInvoice, setFlowBDeliveryInvoice] = useState<InvoiceDetail | null>(null);
 
   const handleSaleComplete = (invoice: InvoiceDetail) => {
     // 1. Instant Synchronous UI State Reset (0ms)
@@ -689,6 +759,32 @@ function BillingView() {
     const invNo = invoice.invoice.invoice_number ? `#${invoice.invoice.invoice_number.split('_')[0]}` : `#${invoice.invoice.id}`;
     setToastMessage(`Bill ${invNo} completed`);
     setTimeout(() => setToastMessage(null), 1500);
+
+    // Flow A: If this was marked as a Delivery Order, create delivery order record
+    if (isDeliveryOrder && invoice.invoice.id) {
+      const custName = customer?.name || deliveryConfig?.customer_name || 'Walk-in Customer';
+      const custPhone = customer?.phone || customer?.phone2 || deliveryConfig?.customer_phone || '';
+      const deliveryAddress = deliveryConfig?.delivery_address_snapshot || customer?.shipping_address_line1 || customer?.billing_address_line1 || 'Counter Delivery Order';
+
+      window.api.invoke(IPC_CHANNELS.DELIVERY.CREATE, {
+        customer_id: customer?.id || null,
+        customer_name: custName,
+        customer_phone: custPhone,
+        delivery_address_snapshot: deliveryAddress,
+        delivery_notes: deliveryConfig?.delivery_notes || null,
+        assigned_staff_id: deliveryConfig?.assigned_staff_id || null,
+        scheduled_slot: deliveryConfig?.scheduled_slot || null,
+        delivery_charge_paise: deliveryConfig?.delivery_charge_paise || 0,
+        subtotal_paise: invoice.invoice.subtotal_paise,
+        total_paise: invoice.invoice.total_paise,
+        invoice_id: invoice.invoice.id,
+        invoice_number: invoice.invoice.invoice_number,
+      }).catch((e: any) => {
+        console.error('Failed to create delivery record:', e);
+      });
+      setIsDeliveryOrder(false);
+      setDeliveryConfig(null);
+    }
 
     // 2. Immediate Direct DOM Focus on the search input
     focusEnterBillBar();
@@ -714,6 +810,25 @@ function BillingView() {
     requestAnimationFrame(focusEnterBillBar);
     setTimeout(focusEnterBillBar, 20);
     setTimeout(focusEnterBillBar, 80);
+    setTimeout(focusEnterBillBar, 150);
+  };
+
+  const handleFlowBDeliveryConfirm = async (config: CreateDeliveryInput) => {
+    if (!flowBDeliveryInvoice) return;
+    try {
+      await window.api.invoke(IPC_CHANNELS.DELIVERY.CREATE, {
+        ...config,
+        invoice_id: flowBDeliveryInvoice.invoice.id,
+        invoice_number: flowBDeliveryInvoice.invoice.invoice_number,
+        subtotal_paise: flowBDeliveryInvoice.invoice.subtotal_paise,
+        total_paise: flowBDeliveryInvoice.invoice.total_paise,
+      });
+      setToastMessage(`Bill #${flowBDeliveryInvoice.invoice.invoice_number?.split('_')[0] || flowBDeliveryInvoice.invoice.id} dispatched for Delivery`);
+      setTimeout(() => setToastMessage(null), 2500);
+      setFlowBDeliveryInvoice(null);
+    } catch (e: any) {
+      alert(e.message || 'Failed to dispatch delivery');
+    }
   };
 
   const handleComplete = async () => {
@@ -728,17 +843,34 @@ function BillingView() {
     if (!lastCompletedInvoice) return;
     setEditError('');
     try {
-      const usernameToVerify = session?.username || 'admin';
-      const loginRes = await window.api.invoke('auth:login', { username: usernameToVerify, password: editPassword });
-      if (!loginRes.success) {
+      const verifyRes = await window.api.invoke('billing:verify-action-password', { password: editPassword });
+      if (!verifyRes.success || !verifyRes.data) {
         setEditError('Invalid password. Edit authorization failed.');
         return;
       }
-      const reopenRes = await window.api.invoke('billing:reopen-invoice', { invoice_id: lastCompletedInvoice.invoice.id });
+      const reopenRes = await window.api.invoke('billing:reopen-invoice', { 
+        invoice_id: lastCompletedInvoice.invoice.id,
+        password: editPassword,
+      });
       if (reopenRes.success) {
         setShowEditPasswordModal(false);
         setEditPassword('');
         await cart.loadInvoice(lastCompletedInvoice.invoice.id);
+
+        // Auto-load linked customer or clear for walk-in (no forced selection)
+        if (lastCompletedInvoice.invoice.customer_id) {
+          try {
+            const custRes = await window.api.invoke('customers:get', { customer_id: lastCompletedInvoice.invoice.customer_id });
+            if (custRes.success && custRes.data) {
+              setCustomer(custRes.data);
+              setCustomerId(custRes.data.id);
+            }
+          } catch (e) {}
+        } else {
+          setCustomer(null);
+          setCustomerId(null);
+        }
+
         queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
         setTimeout(focusEnterBillBar, 50);
       } else {
@@ -753,16 +885,16 @@ function BillingView() {
     if (!lastCompletedInvoice) return;
     setVoidError('');
     try {
-      const res = await window.api.invoke('billing:void-invoice', {
+      const res = await window.api.invoke('billing:delete-invoice', {
         invoice_id: lastCompletedInvoice.invoice.id,
-        void_reason: voidReason.trim() || 'Customer requested void / cancellation',
+        reason: voidReason.trim() || 'Customer requested cancellation / cashier correction',
       });
       if (res.success) {
         setShowVoidConfirmModal(false);
         setVoidReason('');
         setLastCompletedInvoice((prev: InvoiceDetail | null) => prev ? {
           ...prev,
-          invoice: { ...prev.invoice, status: 'void' }
+          invoice: { ...prev.invoice, status: 'void' as any }
         } : null);
         queryClient.invalidateQueries({ queryKey: ['billing', 'held'] });
         setTimeout(focusEnterBillBar, 50);
@@ -804,6 +936,122 @@ function BillingView() {
             Link Customer Account
           </label>
           <CustomerSearch value={customer || null} onChange={handleCustomerChange} />
+          
+          {customer && (
+            <div className="mt-2 bg-brand-500/10 border border-brand-500/30 rounded-xl p-2.5 text-xs animate-in fade-in duration-150 space-y-1.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-extrabold text-white text-[11px]">{customer.name}</span>
+                  <span className="px-1.5 py-0.2 bg-brand-500/20 text-brand-300 border border-brand-500/40 rounded-full text-[9px] font-bold">
+                    {customer.category}
+                  </span>
+                  {(customerIntelligence?.customer_segment || customer.customer_segment) && (
+                    <span className={`px-1.5 py-0.2 border rounded-full text-[8px] font-bold flex items-center gap-0.5 ${getSegmentBadgeStyle(customerIntelligence?.customer_segment || customer.customer_segment).bg} ${getSegmentBadgeStyle(customerIntelligence?.customer_segment || customer.customer_segment).text} ${getSegmentBadgeStyle(customerIntelligence?.customer_segment || customer.customer_segment).border}`}>
+                      <span>{getSegmentBadgeStyle(customerIntelligence?.customer_segment || customer.customer_segment).icon}</span>
+                      <span>{getSegmentBadgeStyle(customerIntelligence?.customer_segment || customer.customer_segment).label}</span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 font-mono text-[10px]">
+                  {customer.outstanding_balance_paise > 0 && (
+                    <span className="text-red-400 font-bold">
+                      Due: ₹{(customer.outstanding_balance_paise / 100).toFixed(2)}
+                    </span>
+                  )}
+                  {customer.advance_balance_paise > 0 && (
+                    <span className="text-brand-400 font-bold">
+                      Adv: ₹{(customer.advance_balance_paise / 100).toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 1-Click Usual Order Shortcut (Intelligence Payoff) */}
+              {customerIntelligence && customerIntelligence.typical_basket.length > 0 && (
+                <div className="flex items-center justify-between bg-brand-500/20 border border-brand-500/40 px-2.5 py-1.5 rounded-lg shadow-inner">
+                  <div className="flex items-center gap-1.5 text-[10px] text-brand-200 truncate min-w-0 pr-2">
+                    <Sparkles size={13} className="text-amber-400 flex-shrink-0 animate-pulse" />
+                    <span className="truncate">
+                      <strong className="text-white">{customer.name.split(' ')[0]}'s usual:</strong> {customerIntelligence.typical_basket_summary}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddUsualOrder}
+                    className="px-2.5 py-1 bg-brand-500 hover:bg-brand-400 active:scale-95 text-white rounded-md text-[10px] font-bold flex-shrink-0 flex items-center gap-1 transition-all shadow-subtle"
+                    title="Quickly add their usual items to bill"
+                  >
+                    <Plus size={12} />
+                    <span>Add Usual</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Preferences Pill Line */}
+              {(customer.preferred_cut || customer.skin_preference || customer.cutting_preference || customer.typical_quantity || customer.packaging_preference) && (
+                <div className="flex items-center gap-1 flex-wrap text-[10px] text-brand-200">
+                  <span className="font-bold text-brand-400 text-[9px]">🔪 Pref:</span>
+                  {customer.preferred_cut && (
+                    <span className="bg-surface-app/80 px-1.5 py-0.5 rounded border border-border-subtle text-[9px]">
+                      {customer.preferred_cut}
+                    </span>
+                  )}
+                  {customer.skin_preference && (
+                    <span className="bg-surface-app/80 px-1.5 py-0.5 rounded border border-border-subtle text-[9px]">
+                      {customer.skin_preference}
+                    </span>
+                  )}
+                  {customer.cutting_preference && (
+                    <span className="bg-surface-app/80 px-1.5 py-0.5 rounded border border-border-subtle text-[9px]">
+                      {customer.cutting_preference}
+                    </span>
+                  )}
+                  {customer.typical_quantity && (
+                    <span className="bg-surface-app/80 px-1.5 py-0.5 rounded border border-border-subtle text-[9px]">
+                      ~{customer.typical_quantity}
+                    </span>
+                  )}
+                  {customer.packaging_preference && (
+                    <span className="bg-surface-app/80 px-1.5 py-0.5 rounded border border-border-subtle text-[9px]">
+                      📦 {customer.packaging_preference}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {customer.special_instructions && (
+                <p className="text-[10px] text-amber-300 font-medium bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded">
+                  ⚠️ {customer.special_instructions}
+                </p>
+              )}
+
+              {/* Delivery Order Toggle (Flow A) */}
+              <div className="flex items-center justify-between pt-1.5 border-t border-border-subtle/50">
+                <label className="flex items-center gap-1.5 cursor-pointer text-[10px] font-bold text-brand-400">
+                  <input
+                    type="checkbox"
+                    checked={isDeliveryOrder}
+                    onChange={e => {
+                      setIsDeliveryOrder(e.target.checked);
+                      if (e.target.checked) setShowDeliveryModal(true);
+                      else setDeliveryConfig(null);
+                    }}
+                    className="rounded accent-brand-500 cursor-pointer"
+                  />
+                  <span>🚚 Send as Home Delivery</span>
+                </label>
+                {isDeliveryOrder && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeliveryModal(true)}
+                    className="text-[10px] text-brand-300 font-bold hover:underline bg-brand-500/20 px-2 py-0.5 rounded border border-brand-500/30"
+                  >
+                    {deliveryConfig ? `Fee: ₹${((deliveryConfig.delivery_charge_paise || 0) / 100).toFixed(0)} (Edit)` : 'Set Address & Slot'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 2. Product Quick Search & Selection */}
@@ -825,14 +1073,20 @@ function BillingView() {
             onSelectPaymentMethod={setPaymentMethod}
             skipPaymentConfirmation={configQuery.data?.billingSettings?.skipPaymentConfirmation ?? false}
             defaultPaymentMethod={configQuery.data?.billingSettings?.defaultPaymentMethod ?? 'cash'}
+            deliveryChargePaise={isDeliveryOrder ? (deliveryConfig?.delivery_charge_paise || 0) : 0}
+            onOpenDeliveryModal={() => setShowDeliveryModal(true)}
+            isDeliveryOrder={isDeliveryOrder}
           />
         </div>
+
+        {/* Customer Outstanding Balance & Purchase History Panel (Only renders when a customer is selected) */}
+        <CustomerOutstandingHistoryPanel customer={customer} />
 
         {/* 4. Parked / Held Bills Trigger */}
         <div className="p-3 border-t border-border-subtle bg-surface-panel flex-shrink-0">
           <button
             onClick={() => setShowHeldBills(true)}
-            className="btn-secondary w-full text-xs font-bold py-2"
+            className="btn-secondary w-full text-xs font-bold py-2 cursor-pointer"
           >
             View Parked / Held Bills
           </button>
@@ -954,7 +1208,7 @@ function BillingView() {
                 </span>
               </div>
 
-              {/* Action Buttons: Reprint, Edit (Password), Delete (Confirm) */}
+              {/* Action Buttons: Reprint, Edit (Password), Delete (Confirm), Delivery Dispatch (Flow B) */}
               <div className="pt-2 pb-1 border-t border-border-subtle/60 grid grid-cols-3 gap-2">
                 <button
                   onClick={handleReprintClick}
@@ -991,6 +1245,17 @@ function BillingView() {
                   Delete
                 </button>
               </div>
+
+              {/* Flow B: Dispatch Completed Bill as Delivery */}
+              {lastCompletedInvoice.invoice.status === 'completed' && (
+                <button
+                  onClick={() => setFlowBDeliveryInvoice(lastCompletedInvoice)}
+                  className="w-full py-1.5 bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5"
+                >
+                  <Truck size={13} className="text-purple-400" />
+                  <span>Dispatch as Delivery (Flow B)</span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1131,6 +1396,22 @@ function BillingView() {
             setTimeout(focusEnterBillBar, 50);
           }}
           onPrintReceipt={handlePrintReceiptById}
+          onSelectBillForEdit={async (invoiceId) => {
+            try {
+              const res = await window.api.invoke('billing:get-invoice', { invoice_id: invoiceId });
+              if (res.success && res.data?.invoice?.customer_id) {
+                const custRes = await window.api.invoke('customers:get', { customer_id: res.data.invoice.customer_id });
+                if (custRes.success && custRes.data) {
+                  setCustomer(custRes.data);
+                  setCustomerId(custRes.data.id);
+                }
+              } else {
+                setCustomer(null);
+                setCustomerId(null);
+              }
+            } catch (e) {}
+            setTimeout(focusEnterBillBar, 50);
+          }}
         />
       )}
 
@@ -1158,6 +1439,15 @@ function BillingView() {
         paidAmount={0}
       />
 
+      <UpiCustomerPromptModal
+        isOpen={showUpiPrompt}
+        onClose={() => setShowUpiPrompt(false)}
+        onSelectCustomer={handleUpiPromptSelectCustomer}
+        onSkipAndContinue={handleUpiPromptSkip}
+        amountPaise={pendingUpiPayment?.amountPaise || totalPaise}
+        initialVpa={pendingUpiPayment?.referenceNumber || ''}
+      />
+
       <HeldBillsList
         isOpen={showHeldBills}
         onClose={() => {
@@ -1180,6 +1470,34 @@ function BillingView() {
 
       {(configQuery.data?.billingSettings?.enableCalculatorWidget ?? true) && (
         <WastageCalculatorWidget />
+      )}
+
+      {/* Flow A: Delivery Order Modal */}
+      {showDeliveryModal && customer && (
+        <DeliveryOrderModal
+          isOpen={showDeliveryModal}
+          onClose={() => setShowDeliveryModal(false)}
+          customerId={customer.id}
+          customerName={customer.name}
+          subtotalPaise={totalPaise}
+          initialValues={deliveryConfig || undefined}
+          onConfirm={(config) => {
+            setDeliveryConfig(config);
+            setIsDeliveryOrder(true);
+          }}
+        />
+      )}
+
+      {/* Flow B: Post-Billing Delivery Dispatch Modal */}
+      {flowBDeliveryInvoice && (
+        <DeliveryOrderModal
+          isOpen={Boolean(flowBDeliveryInvoice)}
+          onClose={() => setFlowBDeliveryInvoice(null)}
+          customerId={flowBDeliveryInvoice.invoice.customer_id || (customer?.id || 1)}
+          customerName={customer?.name || `Customer #${flowBDeliveryInvoice.invoice.customer_id || 'Walk-in'}`}
+          subtotalPaise={flowBDeliveryInvoice.invoice.subtotal_paise || 0}
+          onConfirm={handleFlowBDeliveryConfirm}
+        />
       )}
     </div>
   );
@@ -1344,7 +1662,9 @@ function MainLayout() {
             ? 'purchases'
             : location.pathname === '/payments'
               ? 'payments'
-              : location.pathname === '/reports'
+              : location.pathname === '/delivery'
+                ? 'delivery'
+                : location.pathname === '/reports'
             ? 'reports'
             : location.pathname === '/customers'
               ? 'customers'
@@ -1488,6 +1808,7 @@ function MainLayout() {
         <main className="flex-1 min-h-0 bg-surface-app flex flex-col">
             <Routes>
               <Route path="/" element={<BillingView />} />
+              <Route path="/delivery" element={<DeliveryManagementView />} />
               <Route path="/inventory" element={<InventoryView />} />
               <Route path="/purchases" element={<PurchasesWorkspace />} />
               <Route path="/payments" element={<PaymentsReceiptsView />} />

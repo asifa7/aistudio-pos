@@ -1,7 +1,12 @@
 // useCustomerLedger.ts
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { IPC_CHANNELS } from '../../../../core/ipc/channels';
-import type { LedgerEntry, CustomerStatement, AgingReportRow } from '../types/customer.types';
+import type {
+  LedgerEntry,
+  CustomerStatement,
+  AgingReportResult,
+  CollectionReportResult,
+} from '../types/customer.types';
 
 async function invoke<T>(channel: string, args?: unknown): Promise<T> {
   const res = await window.api.invoke(channel, args);
@@ -9,7 +14,7 @@ async function invoke<T>(channel: string, args?: unknown): Promise<T> {
   return res.data as T;
 }
 
-// ─── Ledger ───────────────────────────────────────────────────
+// ─── Ledger & Statement ────────────────────────────────────────
 
 export function useCustomerLedger(
   customerId: number | null,
@@ -39,12 +44,54 @@ export function useCustomerStatement(
 // ─── A/R Reports ─────────────────────────────────────────────
 
 export function useARReports() {
+  const queryClient = useQueryClient();
+
   return {
-    useAgingReport: (asOfDate?: string) =>
-      useQuery<AgingReportRow[]>({
-        queryKey: ['ar-aging', asOfDate],
-        queryFn: () => invoke(IPC_CHANNELS.CUSTOMERS.GET_AGING_REPORT, { asOfDate }),
+    useAgingReport: (opts?: { asOfDate?: string; boundaries?: number[] } | string) => {
+      const parsedArgs = typeof opts === 'string' ? { asOfDate: opts } : opts;
+      return useQuery<AgingReportResult>({
+        queryKey: ['ar-aging', parsedArgs],
+        queryFn: () => invoke(IPC_CHANNELS.CUSTOMERS.GET_AGING_REPORT, parsedArgs),
+        staleTime: 30_000,
+      });
+    },
+
+    useAgingSettings: () =>
+      useQuery<{ boundaries: number[]; defaultBoundaries: number[] }>({
+        queryKey: ['ar-aging-settings'],
+        queryFn: () => invoke(IPC_CHANNELS.CUSTOMERS.GET_AGING_SETTINGS),
         staleTime: 60_000,
+      }),
+
+    useUpdateAgingSettings: () =>
+      useMutation({
+        mutationFn: (boundaries: number[]) =>
+          invoke<{ success: boolean; boundaries: number[] }>(IPC_CHANNELS.CUSTOMERS.UPDATE_AGING_SETTINGS, { boundaries }),
+        onSuccess: () => {
+          queryClient.invalidateQueries({ queryKey: ['ar-aging-settings'] });
+          queryClient.invalidateQueries({ queryKey: ['ar-aging'] });
+        },
+      }),
+
+    useCustomerOverdueInvoices: (customerId: number | null, asOfDate?: string) =>
+      useQuery<{
+        customer: any;
+        asOfDate: string;
+        invoices: {
+          id: number;
+          invoice_number: string;
+          completed_at: string;
+          total_paise: number;
+          paid_paise: number;
+          remaining_paise: number;
+          days_overdue: number;
+          payment_status: string;
+        }[];
+      }>({
+        queryKey: ['customer-overdue-invoices', customerId, asOfDate],
+        queryFn: () => invoke(IPC_CHANNELS.CUSTOMERS.GET_OVERDUE_INVOICES, { customer_id: customerId, asOfDate }),
+        enabled: customerId !== null,
+        staleTime: 20_000,
       }),
 
     useOutstandingReport: (filters?: { category?: string; minOutstanding?: number }) =>
@@ -54,13 +101,15 @@ export function useARReports() {
         staleTime: 30_000,
       }),
 
-    useCollectionReport: (startDate: string, endDate: string) =>
-      useQuery({
-        queryKey: ['ar-collection', startDate, endDate],
-        queryFn: () => invoke(IPC_CHANNELS.CUSTOMERS.GET_COLLECTION_REPORT, { startDate, endDate }),
-        enabled: !!startDate && !!endDate,
+    useCollectionReport: (filters: { startDate: string; endDate: string; customerId?: number; method?: string; receivedBy?: number } | string, endDateParam?: string) => {
+      const parsedArgs = typeof filters === 'string' ? { startDate: filters, endDate: endDateParam || filters } : filters;
+      return useQuery<CollectionReportResult>({
+        queryKey: ['ar-collection', parsedArgs],
+        queryFn: () => invoke(IPC_CHANNELS.CUSTOMERS.GET_COLLECTION_REPORT, parsedArgs),
+        enabled: !!parsedArgs.startDate && !!parsedArgs.endDate,
         staleTime: 30_000,
-      }),
+      });
+    },
 
     useAdvanceReport: () =>
       useQuery({

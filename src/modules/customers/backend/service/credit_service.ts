@@ -302,6 +302,13 @@ export class CreditService {
       return { paymentId, applied, advanceCreated };
     })();
 
+    try {
+      const { customerIntelligenceService } = require('./customer_intelligence_service');
+      customerIntelligenceService.handleCustomerTransactionEvent(customerId);
+    } catch (e) {
+      // Non-blocking
+    }
+
     return { success: true, data: result };
   }
 
@@ -356,6 +363,13 @@ export class CreditService {
 
       return paymentId;
     })();
+
+    try {
+      const { customerIntelligenceService } = require('./customer_intelligence_service');
+      customerIntelligenceService.handleCustomerTransactionEvent(customerId);
+    } catch (e) {
+      // Non-blocking
+    }
 
     return db.prepare('SELECT * FROM customer_payment_records WHERE id = ?').get(rowId);
   }

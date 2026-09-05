@@ -194,9 +194,33 @@ export const receiptService = {
     // 16. Full-width dashed divider
     lines.push(divider);
 
-    // 17. Net Amount
-    const grandTotalStr = (invoice.total_paise / 100).toFixed(2);
-    lines.push(alignLeftRight('Net Amount :', `₹${grandTotalStr}`, width));
+    // 17. Net Amount & Customer Outstanding Breakdown
+    let previousOutstandingPaise = 0;
+    if (invoice.customer_id) {
+      try {
+        const ledgerRow = db.prepare(`
+          SELECT COALESCE(SUM(debit_paise - credit_paise), 0) as balance_paise
+          FROM customer_ledger
+          WHERE customer_id = ?
+            AND NOT (ref_type = 'invoice' AND ref_id = ?)
+        `).get(invoice.customer_id, invoice.id) as { balance_paise: number } | undefined;
+        if (ledgerRow && ledgerRow.balance_paise > 0) {
+          previousOutstandingPaise = ledgerRow.balance_paise;
+        }
+      } catch (e) {}
+    }
+
+    const currentBillStr = (invoice.total_paise / 100).toFixed(2);
+    if (previousOutstandingPaise > 0) {
+      const prevOutStr = (previousOutstandingPaise / 100).toFixed(2);
+      const grandTotalDueStr = ((invoice.total_paise + previousOutstandingPaise) / 100).toFixed(2);
+      lines.push(alignLeftRight('Current Bill Amount:', `₹${currentBillStr}`, width));
+      lines.push(alignLeftRight('Previous Outstanding:', `₹${prevOutStr}`, width));
+      lines.push(divider);
+      lines.push(alignLeftRight('Grand Total Due :', `₹${grandTotalDueStr}`, width));
+    } else {
+      lines.push(alignLeftRight('Net Amount :', `₹${currentBillStr}`, width));
+    }
 
     // 18. Full-width dashed divider
     lines.push(divider);
@@ -413,6 +437,22 @@ export const receiptService = {
       if (cashTenderedPaise > invoice.total_paise) {
         changeDuePaise = cashTenderedPaise - invoice.total_paise;
       }
+    }
+
+    // Customer Outstanding Balance
+    let previousOutstandingPaise = 0;
+    if (invoice.customer_id) {
+      try {
+        const ledgerRow = db.prepare(`
+          SELECT COALESCE(SUM(debit_paise - credit_paise), 0) as balance_paise
+          FROM customer_ledger
+          WHERE customer_id = ?
+            AND NOT (ref_type = 'invoice' AND ref_id = ?)
+        `).get(invoice.customer_id, invoice.id) as { balance_paise: number } | undefined;
+        if (ledgerRow && ledgerRow.balance_paise > 0) {
+          previousOutstandingPaise = ledgerRow.balance_paise;
+        }
+      } catch (e) {}
     }
 
     return `<!DOCTYPE html>
@@ -639,11 +679,27 @@ export const receiptService = {
     <!-- 16. Full-width dashed divider -->
     <div class="divider"></div>
 
-    <!-- 17. Net Amount Row -->
-    <div class="net-amount-row">
-      <span class="net-label">Net Amount :</span>
-      <span class="net-value">₹${grandTotalStr}</span>
-    </div>
+    <!-- 17. Net Amount & Customer Outstanding Breakdown -->
+    ${previousOutstandingPaise > 0 ? `
+      <div class="adj-row" style="font-size: ${is58 ? '11px' : '12px'}; font-weight: 700; margin: 2px 0;">
+        <span>Current Bill Amount:</span>
+        <span>₹${(invoice.total_paise / 100).toFixed(2)}</span>
+      </div>
+      <div class="adj-row" style="font-size: ${is58 ? '11px' : '12px'}; font-weight: 700; margin: 2px 0;">
+        <span>Previous Outstanding:</span>
+        <span>₹${(previousOutstandingPaise / 100).toFixed(2)}</span>
+      </div>
+      <div class="divider"></div>
+      <div class="net-amount-row">
+        <span class="net-label">Grand Total Due :</span>
+        <span class="net-value">₹${((invoice.total_paise + previousOutstandingPaise) / 100).toFixed(2)}</span>
+      </div>
+    ` : `
+      <div class="net-amount-row">
+        <span class="net-label">Net Amount :</span>
+        <span class="net-value">₹${grandTotalStr}</span>
+      </div>
+    `}
 
     <!-- 18. Full-width dashed divider -->
     <div class="divider"></div>

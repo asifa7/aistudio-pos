@@ -17,18 +17,23 @@ import {
   Calendar,
   Layers,
   Snowflake,
-  CheckCircle2
+  CheckCircle2,
+  Printer,
+  FileSpreadsheet
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useActiveRates } from '../../../billing/frontend/hooks/useActiveRates';
 import type { ProductVariant } from '../../../billing/frontend/types/billing.types';
 import { 
   useRefrigeratorStock, 
-  useFridgeActivityLog,
-  useRecordFridgeAddition,
-  RefrigeratorStockItem 
+  useFridgeActivityLog, 
+  useRecordFridgeAddition, 
+  RefrigeratorStockItem,
+  FridgeSlipData
 } from '../hooks/useRefrigeratorStock';
 import FridgeTakeOutModal from './FridgeTakeOutModal';
+import FridgeSlipPrintModal from './FridgeSlipPrintModal';
+import FridgeDailyLogPrintModal from './FridgeDailyLogPrintModal';
 import { useActiveBranches } from '../hooks/useBranches';
 import { ErrorBoundary } from '../../../../core/shared/ErrorBoundary';
 
@@ -52,7 +57,7 @@ function RefrigeratorStockViewInner() {
   const { data: rawFridgeItems, isLoading, isError, error, refetch } = useRefrigeratorStock(selectedBranchId);
   const safeFridgeItems = useMemo(() => Array.isArray(rawFridgeItems) ? rawFridgeItems : [], [rawFridgeItems]);
 
-  const { data: rawActivityLogs = [], isLoading: isLoadingActivity, refetch: refetchActivity } = useFridgeActivityLog(selectedBranchId, 100);
+  const { data: rawActivityLogs = [], isLoading: isLoadingActivity, refetch: refetchActivity } = useFridgeActivityLog(selectedBranchId, 150);
   const activityLogs = useMemo(() => Array.isArray(rawActivityLogs) ? rawActivityLogs : [], [rawActivityLogs]);
 
   // Active product variants from POS billing
@@ -73,6 +78,11 @@ function RefrigeratorStockViewInner() {
   const [searchError, setSearchError] = useState('');
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [isCommitting, setIsCommitting] = useState(false);
+
+  // Printing Modals State
+  const [activeSlip, setActiveSlip] = useState<FridgeSlipData | null>(null);
+  const [isDailyLogModalOpen, setIsDailyLogModalOpen] = useState(false);
+  const [lastAddedSlips, setLastAddedSlips] = useState<FridgeSlipData[]>([]);
 
   // Staged items awaiting commit (Cart)
   const [stagedItems, setStagedItems] = useState<StagedFridgeItem[]>([]);
@@ -225,16 +235,20 @@ function RefrigeratorStockViewInner() {
     if (stagedItems.length === 0 || isCommitting) return;
     setIsCommitting(true);
     setSearchError('');
+    const generatedSlips: FridgeSlipData[] = [];
 
     try {
       for (const item of stagedItems) {
-        await addMutation.mutateAsync({
+        const res: any = await addMutation.mutateAsync({
           product_variant_id: item.variant.id,
           quantity: item.quantity,
           unit_type: item.unitType,
           entry_date: item.entryDate,
           branch_id: selectedBranchId,
         });
+        if (res?.slip) {
+          generatedSlips.push(res.slip);
+        }
       }
 
       queryClient.invalidateQueries({ queryKey: ['inventory'] });
@@ -244,8 +258,13 @@ function RefrigeratorStockViewInner() {
 
       const count = stagedItems.length;
       setStagedItems([]);
-      setSuccessMsg(`Successfully moved ${count} product${count > 1 ? 's' : ''} to Refrigerator Inventory!`);
-      setTimeout(() => setSuccessMsg(null), 3500);
+      setLastAddedSlips(generatedSlips);
+      setSuccessMsg(`Successfully added ${count} item${count > 1 ? 's' : ''} to Refrigerator Inventory!`);
+
+      // If exactly 1 item was staged and added, immediately prompt/open print slip
+      if (generatedSlips.length === 1) {
+        setActiveSlip(generatedSlips[0]);
+      }
 
       requestAnimationFrame(() => productInputRef.current?.focus());
       setTimeout(() => productInputRef.current?.focus(), 50);
@@ -397,7 +416,7 @@ function RefrigeratorStockViewInner() {
                   setSearchError('');
                   requestAnimationFrame(() => productInputRef.current?.focus());
                 }}
-                className="text-[10px] text-text-muted hover:text-text-primary flex items-center gap-1 bg-surface-card px-2 py-0.5 rounded border border-border-subtle"
+                className="text-[10px] text-text-muted hover:text-text-primary flex items-center gap-1 bg-surface-card px-2 py-0.5 rounded border border-border-subtle cursor-pointer"
               >
                 <X size={12} /> Clear Selection
               </button>
@@ -489,7 +508,7 @@ function RefrigeratorStockViewInner() {
               <button
                 type="button"
                 onClick={() => setStagedItems([])}
-                className="text-[10px] text-text-muted hover:text-rose-400"
+                className="text-[10px] text-text-muted hover:text-rose-400 cursor-pointer"
               >
                 Clear List
               </button>
@@ -530,7 +549,7 @@ function RefrigeratorStockViewInner() {
                       <button
                         type="button"
                         onClick={() => removeStagedItem(item.tempId)}
-                        className="h-6 w-6 flex items-center justify-center rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        className="h-6 w-6 flex items-center justify-center rounded text-text-muted hover:text-rose-400 hover:bg-rose-500/10 transition-colors cursor-pointer"
                         title="Remove item"
                       >
                         <Trash2 size={12} />
@@ -550,7 +569,7 @@ function RefrigeratorStockViewInner() {
                 type="button"
                 onClick={commitAllStagedItems}
                 disabled={isCommitting}
-                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5"
+                className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer"
               >
                 <CheckCircle2 size={14} />
                 <span>{isCommitting ? 'Moving to Fridge...' : 'Move to Refrigerator (SPACE)'}</span>
@@ -561,10 +580,22 @@ function RefrigeratorStockViewInner() {
 
         {searchError && <p className="text-xs font-semibold text-rose-400">{searchError}</p>}
         {successMsg && (
-          <p className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2 flex items-center gap-1.5">
-            <ShieldCheck size={14} />
-            <span>{successMsg}</span>
-          </p>
+          <div className="text-xs font-semibold text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <ShieldCheck size={14} />
+              <span>{successMsg}</span>
+            </div>
+            {lastAddedSlips.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveSlip(lastAddedSlips[0])}
+                className="px-2.5 py-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer"
+              >
+                <Printer size={12} />
+                <span>Print IN Slip</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -575,7 +606,7 @@ function RefrigeratorStockViewInner() {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentTab('stock')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
                 currentTab === 'stock'
                   ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
                   : 'text-text-muted hover:text-text-primary'
@@ -590,7 +621,7 @@ function RefrigeratorStockViewInner() {
 
             <button
               onClick={() => setCurrentTab('activity')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 ${
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
                 currentTab === 'activity'
                   ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/30'
                   : 'text-text-muted hover:text-text-primary'
@@ -604,13 +635,24 @@ function RefrigeratorStockViewInner() {
             </button>
           </div>
 
-          {/* Quick Filters and Total Stock in Table Header */}
+          {/* Quick Filters, Daily Log Print Button and Total Stock in Table Header */}
           <div className="flex items-center gap-2 flex-1 justify-end flex-wrap">
+            {/* Prominent Printable Daily Fridge Log Sheet Button */}
+            <button
+              type="button"
+              onClick={() => setIsDailyLogModalOpen(true)}
+              className="px-3 py-1.5 bg-brand-500 hover:bg-brand-600 active:bg-brand-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm shadow-brand-500/20 cursor-pointer"
+              title="Print A4 Daily Refrigerator In/Out Log Sheet"
+            >
+              <Printer size={13} />
+              <span>Print Fridge Log</span>
+            </button>
+
             {/* Quick Freshness Filters */}
             <div className="flex items-center gap-1 bg-surface-card p-0.5 rounded-xl border border-border-subtle text-[10px]">
               <button
                 onClick={() => setAgeFilter('ALL')}
-                className={`px-2 py-0.5 rounded-lg font-bold transition-all ${
+                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
                   ageFilter === 'ALL' ? 'bg-cyan-500/20 text-cyan-400' : 'text-text-muted hover:text-text-primary'
                 }`}
               >
@@ -618,7 +660,7 @@ function RefrigeratorStockViewInner() {
               </button>
               <button
                 onClick={() => setAgeFilter('FRESH')}
-                className={`px-2 py-0.5 rounded-lg font-bold transition-all ${
+                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
                   ageFilter === 'FRESH' ? 'bg-emerald-500/20 text-emerald-400' : 'text-text-muted hover:text-emerald-400'
                 }`}
               >
@@ -626,7 +668,7 @@ function RefrigeratorStockViewInner() {
               </button>
               <button
                 onClick={() => setAgeFilter('AGING')}
-                className={`px-2 py-0.5 rounded-lg font-bold transition-all ${
+                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
                   ageFilter === 'AGING' ? 'bg-amber-500/20 text-amber-400' : 'text-text-muted hover:text-amber-400'
                 }`}
               >
@@ -634,7 +676,7 @@ function RefrigeratorStockViewInner() {
               </button>
               <button
                 onClick={() => setAgeFilter('CRITICAL')}
-                className={`px-2 py-0.5 rounded-lg font-bold transition-all ${
+                className={`px-2 py-0.5 rounded-lg font-bold transition-all cursor-pointer ${
                   ageFilter === 'CRITICAL' ? 'bg-rose-500/20 text-rose-400' : 'text-text-muted hover:text-rose-400'
                 }`}
               >
@@ -653,7 +695,7 @@ function RefrigeratorStockViewInner() {
               </span>
             </div>
 
-            <div className="relative w-36 sm:w-44">
+            <div className="relative w-32 sm:w-40">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
               <input
                 type="text"
@@ -668,7 +710,7 @@ function RefrigeratorStockViewInner() {
               <select
                 value={categoryFilter}
                 onChange={e => setCategoryFilter(e.target.value)}
-                className="bg-surface-card border border-border-subtle rounded-xl px-2.5 py-1 text-xs text-text-primary outline-none focus:border-brand-500"
+                className="bg-surface-card border border-border-subtle rounded-xl px-2.5 py-1 text-xs text-text-primary outline-none focus:border-brand-500 cursor-pointer"
               >
                 <option value="ALL">All Categories</option>
                 {categories.map(c => (
@@ -679,7 +721,7 @@ function RefrigeratorStockViewInner() {
 
             <button
               onClick={() => setShowThresholdSettings(!showThresholdSettings)}
-              className={`p-1.5 rounded-xl border text-xs font-semibold transition-all ${
+              className={`p-1.5 rounded-xl border text-xs font-semibold transition-all cursor-pointer ${
                 showThresholdSettings
                   ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-400'
                   : 'bg-surface-card border-border-subtle text-text-muted hover:text-text-primary'
@@ -691,7 +733,7 @@ function RefrigeratorStockViewInner() {
 
             <button
               onClick={handleRefresh}
-              className="p-1.5 bg-surface-card hover:bg-surface-hover text-text-muted hover:text-text-primary border border-border-subtle rounded-xl transition-colors"
+              className="p-1.5 bg-surface-card hover:bg-surface-hover text-text-muted hover:text-text-primary border border-border-subtle rounded-xl transition-colors cursor-pointer"
               title="Refresh Refrigerator Stock"
             >
               <RefreshCw size={13} />
@@ -806,7 +848,7 @@ function RefrigeratorStockViewInner() {
                         <td className="py-3 px-4 text-right">
                           <button
                             onClick={() => setSelectedItemForTakeOut(item)}
-                            className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1"
+                            className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-lg text-xs font-bold transition-all inline-flex items-center gap-1 cursor-pointer"
                             title="Take out stock for kitchen prep or direct sale"
                           >
                             <LogOut size={12} />
@@ -830,7 +872,7 @@ function RefrigeratorStockViewInner() {
                 <History size={32} className="mx-auto text-text-muted/50" />
                 <div className="text-sm font-bold text-text-secondary">No Movement History Yet</div>
                 <p className="text-xs text-text-muted">
-                  Depositing, taking out, or billing stock directly from the refrigerator will log detailed records here.
+                  Depositing or taking out stock directly from the refrigerator will log detailed records here.
                 </p>
               </div>
             ) : (
@@ -842,18 +884,20 @@ function RefrigeratorStockViewInner() {
                     <th className="py-2.5 px-3 text-center">MOVEMENT TYPE</th>
                     <th className="py-2.5 px-3 text-right">QUANTITY</th>
                     <th className="py-2.5 px-4">PURPOSE / REASON</th>
-                    <th className="py-2.5 pr-4 text-right">RECORDED BY</th>
+                    <th className="py-2.5 px-3">RECORDED BY</th>
+                    <th className="py-2.5 pr-4 text-right">ACTION</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle/50 font-mono text-xs">
                   {activityLogs.map(log => {
-                    const isWeight = log.unit_type === 'weight' || log.unit_type === 'live_dual';
+                    const isWeight = log.unit_type === 'weight' || log.unit_type === 'live_dual' || log.quantity_grams != null;
                     const unitLabel = isWeight ? 'kg' : 'pcs';
-                    const isDeposit = log.action_type === 'fridge_deposit' || (log.quantity_grams ?? 0) > 0 || (log.quantity_units ?? 0) > 0;
+                    const isDeposit = log.action_type === 'fridge_deposit' || (!log.action_type.includes('removal') && (log.notes || '').toLowerCase().includes('deposit'));
                     
-                    const qtyDisplay = isWeight
-                      ? `${Math.abs((log.quantity_grams || 0) / 1000).toFixed(3)} ${unitLabel}`
-                      : `${Math.abs(log.quantity_units || 0)} ${unitLabel}`;
+                    const rawQty = isWeight
+                      ? Math.abs(log.quantity_grams || 0) / 1000
+                      : Math.abs(log.quantity_units || 0);
+                    const qtyDisplay = `${rawQty.toFixed(isWeight ? 3 : 0)} ${unitLabel}`;
 
                     return (
                       <tr key={log.id} className="hover:bg-surface-hover/40 transition-colors">
@@ -885,8 +929,33 @@ function RefrigeratorStockViewInner() {
                         <td className="py-2.5 px-4 font-sans text-text-secondary text-xs">
                           {log.notes || '—'}
                         </td>
-                        <td className="py-2.5 pr-4 text-right font-sans text-text-muted text-xs">
+                        <td className="py-2.5 px-3 font-sans text-text-muted text-xs">
                           {log.user_name || 'Admin'}
+                        </td>
+                        <td className="py-2.5 pr-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setActiveSlip({
+                                action_type: isDeposit ? 'IN' : 'OUT',
+                                reference_number: log.reference_number || (isDeposit ? `FRG-IN-#${log.id}` : `FRG-OUT-#${log.id}`),
+                                ledger_id: log.id,
+                                product_name: log.product_name,
+                                variant_name: log.variant_name,
+                                product_code: log.product_code || '-',
+                                quantity: rawQty,
+                                unit: unitLabel,
+                                reason: log.notes || (isDeposit ? 'Deposit' : 'Removal'),
+                                created_at: log.created_at,
+                                user_name: log.user_name || 'Admin',
+                              });
+                            }}
+                            className="px-2 py-1 bg-surface-card hover:bg-surface-hover text-text-secondary hover:text-brand-400 border border-border-subtle rounded-lg text-[11px] font-bold transition-colors inline-flex items-center gap-1 cursor-pointer"
+                            title="Reprint Slip"
+                          >
+                            <Printer size={11} />
+                            <span>Slip</span>
+                          </button>
                         </td>
                       </tr>
                     );
@@ -906,6 +975,30 @@ function RefrigeratorStockViewInner() {
             setSelectedItemForTakeOut(null);
             handleRefresh();
           }}
+          onSuccess={(slip) => {
+            setSelectedItemForTakeOut(null);
+            handleRefresh();
+            setActiveSlip(slip);
+          }}
+        />
+      )}
+
+      {/* Individual IN / OUT Action Slip Print Modal */}
+      {activeSlip && (
+        <FridgeSlipPrintModal
+          isOpen={!!activeSlip}
+          onClose={() => setActiveSlip(null)}
+          slip={activeSlip}
+        />
+      )}
+
+      {/* Daily Fridge Log Sheet Print Modal */}
+      {isDailyLogModalOpen && (
+        <FridgeDailyLogPrintModal
+          isOpen={isDailyLogModalOpen}
+          onClose={() => setIsDailyLogModalOpen(false)}
+          branchId={selectedBranchId}
+          branchName={branches.find(b => b.id === selectedBranchId)?.name || 'Main Branch'}
         />
       )}
     </div>

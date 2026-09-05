@@ -25,6 +25,8 @@ import {
 } from '../../../../core/database/repositories/repository_interfaces';
 
 import { authService } from '../../../auth/backend/service/auth_service';
+import { inventoryLedgerService } from '../../../inventory/backend/service/inventory_ledger_service';
+import { configService } from '../../../../core/config/config_service';
 
 const DEFAULT_GST_RATE_BPS = 500;
 
@@ -212,7 +214,17 @@ export class InvoiceService {
     return this.getInvoice(invoiceId);
   }
 
-  public reopenCompletedInvoice(invoiceId: number) {
+  public verifyActionPassword(password: string): boolean {
+    return configService.verifyBillActionPassword(password);
+  }
+
+  public reopenCompletedInvoice(invoiceId: number, password?: string) {
+    if (password) {
+      if (!configService.verifyBillActionPassword(password)) {
+        throw new ConflictError('Invalid authorization password. Reopen denied.');
+      }
+    }
+
     const databaseProvider = (this.invoiceRepo as any).dbProvider;
     return databaseProvider.transaction(() => {
       const { invoice, items } = this.invoiceRepo.findById(invoiceId);
@@ -222,6 +234,7 @@ export class InvoiceService {
 
       this.invoiceRepo.setStatus(invoiceId, 'draft');
 
+      // Atomically restore stock in ledger & batches so subsequent completion re-deducts cleanly
       for (const item of items) {
         let targetVariantId = item.product_variant_id;
         let revGrams = item.quantity_grams;
@@ -234,18 +247,111 @@ export class InvoiceService {
           if (revUnits !== null) revUnits = Math.ceil(revUnits / variant.yield_ratio);
         }
 
-        this.inventoryRepo.createPendingEvent({
-          invoice_id: invoiceId,
-          invoice_item_id: item.id,
-          product_variant_id: targetVariantId,
-          quantity_grams: revGrams,
-          quantity_units: revUnits,
-          event_type: 'sale_reversal',
-        });
+        try {
+          inventoryLedgerService.recordMovement({
+            product_variant_id: targetVariantId,
+            branch_id: 1,
+            action_type: 'STOCK_ADJUSTMENT',
+            quantity_grams: revGrams,
+            quantity_units: revUnits,
+            reference_type: 'invoice_reopen',
+            reference_id: invoiceId,
+            reference_number: invoice.invoice_number || `INV-${invoiceId}`,
+            notes: `Stock restored for edit/reopen of invoice #${invoice.invoice_number || invoiceId}`,
+          });
+        } catch (e: any) {
+          logger.warn(`Notice on stock restoration for variant #${targetVariantId}: ${e.message}`);
+        }
       }
 
       logger.info('Completed invoice reopened for editing', { invoiceId });
       return this.getInvoice(invoiceId);
+    });
+  }
+
+  public deleteInvoice(input: { invoice_id: number; reason: string; password?: string }) {
+    if (input.password) {
+      if (!configService.verifyBillActionPassword(input.password)) {
+        throw new ConflictError('Invalid authorization password. Delete denied.');
+      }
+    }
+
+    const databaseProvider = (this.invoiceRepo as any).dbProvider;
+    return databaseProvider.transaction(() => {
+      const { invoice, items } = this.invoiceRepo.findById(input.invoice_id);
+      
+      // 1. Restore stock if invoice was completed
+      if (invoice.status === 'completed') {
+        for (const item of items) {
+          let targetVariantId = item.product_variant_id;
+          let revGrams = item.quantity_grams;
+          let revUnits = item.quantity_units;
+
+          const variant = db.prepare('SELECT parent_variant_id, yield_ratio FROM product_variants WHERE id = ?').get(item.product_variant_id) as any;
+          if (variant && variant.parent_variant_id && variant.yield_ratio && variant.yield_ratio > 0) {
+            targetVariantId = variant.parent_variant_id;
+            if (revGrams !== null) revGrams = Math.round(revGrams / variant.yield_ratio);
+            if (revUnits !== null) revUnits = Math.ceil(revUnits / variant.yield_ratio);
+          }
+
+          try {
+            inventoryLedgerService.recordMovement({
+              product_variant_id: targetVariantId,
+              branch_id: 1,
+              action_type: 'STOCK_ADJUSTMENT',
+              quantity_grams: revGrams,
+              quantity_units: revUnits,
+              reference_type: 'invoice_delete',
+              reference_id: input.invoice_id,
+              reference_number: invoice.invoice_number || `INV-${input.invoice_id}`,
+              notes: `Stock restored from deleted invoice #${invoice.invoice_number || input.invoice_id}: ${input.reason}`,
+            });
+          } catch (e: any) {
+            logger.warn(`Failed to restore stock on bill delete for variant #${targetVariantId}: ${e.message}`);
+          }
+        }
+      }
+
+      // 2. Reverse customer credit sale if customer paid on credit
+      if (invoice.customer_id) {
+        try {
+          const creditSaleRow = db.prepare("SELECT debit_paise FROM customer_ledger WHERE customer_id = ? AND ref_type = 'invoice' AND ref_id = ?").get(invoice.customer_id, input.invoice_id) as { debit_paise: number } | undefined;
+          if (creditSaleRow && creditSaleRow.debit_paise > 0) {
+            creditService.createCreditNote(invoice.customer_id, input.invoice_id, creditSaleRow.debit_paise, `Reversal of deleted invoice #${invoice.invoice_number || input.invoice_id}: ${input.reason}`);
+          }
+        } catch (e: any) {
+          logger.warn(`Customer ledger reversal notice on invoice delete: ${e.message}`);
+        }
+      }
+
+      // 3. Mark invoice void/deleted with reason and audit trail
+      db.prepare(`
+        UPDATE invoices SET
+          status = 'void',
+          payment_status = 'unpaid',
+          void_reason = ?,
+          voided_at = CURRENT_TIMESTAMP,
+          narration = ?
+        WHERE id = ?
+      `).run(input.reason, `DELETED: ${input.reason}`, input.invoice_id);
+
+      // 4. Cancel linked delivery order if any
+      try {
+        db.prepare("UPDATE deliveries SET status = 'cancelled' WHERE invoice_id = ?").run(input.invoice_id);
+      } catch (e) {}
+
+      // 5. Audit Logging
+      try {
+        auditLogger.log(authService.getCurrentUserId() || 1, 'INVOICE_DELETED', {
+          invoice_id: input.invoice_id,
+          invoice_number: invoice.invoice_number,
+          total_paise: invoice.total_paise,
+          reason: input.reason,
+        });
+      } catch (e) {}
+
+      logger.info('Invoice deleted successfully', { invoiceId: input.invoice_id, reason: input.reason });
+      return { success: true, invoice_id: input.invoice_id };
     });
   }
 
@@ -591,7 +697,19 @@ export class InvoiceService {
 
       logger.info('Invoice completed', { invoiceId, invoiceNumber, totalPaise: finalNetTotalPaise });
 
-      return this.getInvoice(invoiceId);
+      const completedResult = this.getInvoice(invoiceId);
+
+      // Trigger Customer Intelligence calculation event
+      if (invoice.customer_id) {
+        try {
+          const { customerIntelligenceService } = require('../../../customers/backend/service/customer_intelligence_service');
+          customerIntelligenceService.handleCustomerTransactionEvent(invoice.customer_id);
+        } catch (e) {
+          logger.warn('Failed to trigger customer intelligence calculation on invoice complete', { customerId: invoice.customer_id });
+        }
+      }
+
+      return completedResult;
     });
   }
 
@@ -627,14 +745,36 @@ export class InvoiceService {
           if (revUnits !== null) revUnits = Math.ceil(revUnits / variant.yield_ratio);
         }
 
-        this.inventoryRepo.createPendingEvent({
-          invoice_id: parsed.data.invoice_id,
-          invoice_item_id: item.id,
+        // Atomic stock reversal on invoice void
+        const { inventoryLedgerService } = require('../../../inventory/backend/service/inventory_ledger_service');
+        inventoryLedgerService.recordMovement({
           product_variant_id: targetVariantId,
+          branch_id: 1,
+          action_type: 'STOCK_ADJUSTMENT',
           quantity_grams: revGrams,
           quantity_units: revUnits,
-          event_type: 'sale_reversal',
+          reference_type: 'invoice',
+          reference_id: parsed.data.invoice_id,
+          reference_number: invoice.invoice_number,
+          reason_code: 'unrecorded_sale',
+          notes: `Reversal of voided invoice #${invoice.invoice_number}: ${parsed.data.void_reason}`,
+          created_by: parsed.data.voided_by,
         });
+
+        // Restore batch stock if allocations existed
+        try {
+          const allocs = db.prepare('SELECT * FROM invoice_item_batch_allocations WHERE invoice_item_id = ?').all(item.id) as any[];
+          for (const al of allocs) {
+            db.prepare(`
+              UPDATE product_stock_batches SET
+                current_quantity_grams = CASE WHEN current_quantity_grams IS NOT NULL THEN current_quantity_grams + ? ELSE NULL END,
+                current_quantity_units = CASE WHEN current_quantity_units IS NOT NULL THEN current_quantity_units + ? ELSE NULL END,
+                status = 'active',
+                updated_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+            `).run(al.quantity_grams || 0, al.quantity_units || 0, al.batch_id);
+          }
+        } catch (e) {}
       }
 
       auditLogger.log(
@@ -776,28 +916,61 @@ export class InvoiceService {
             }
           }
 
-          this.inventoryRepo.updateLedgerStock(targetVariantId, deltaGrams, deltaUnits);
-
-          this.inventoryRepo.createTransaction({
-            product_variant_id: targetVariantId,
-            transaction_type: 'manual_adjustment',
-            quantity_grams: deltaGrams,
-            quantity_units: deltaUnits,
-            reference_id: targetInvoiceId,
-          });
-
           const { inventoryLedgerService } = require('../../../inventory/backend/service/inventory_ledger_service');
-          inventoryLedgerService.recordEntry({
+          inventoryLedgerService.recordMovement({
             product_variant_id: targetVariantId,
             branch_id: 1,
-            action_type: 'return',
+            action_type: 'SALE_RETURN',
             quantity_grams: deltaGrams,
             quantity_units: deltaUnits,
             unit_cost_paise: item.unit_rate_paise,
             reference_type: 'invoice',
             reference_id: targetInvoiceId,
             reference_number: originalInvoiceNumber,
-            notes: `Sales return restored (${originalInvoiceNumber})`,
+            reason_code: 'other',
+            notes: `Sales return restored (${originalInvoiceNumber}) - ${input.reason || 'Restocked'}`,
+            created_by: managerId,
+          });
+
+          // Also activate a batch in product_stock_batches for FIFO availability
+          try {
+            const cleanDate = new Date().toISOString().slice(0, 10).replace(/[^0-9]/g, '');
+            const retBatchNo = `BAT-RET-${cleanDate}-${targetInvoiceId}-${targetVariantId}-${Math.floor(Math.random()*1000)}`;
+            db.prepare(`
+              INSERT INTO product_stock_batches (
+                batch_number, product_variant_id, received_date, original_batch_date,
+                initial_quantity_grams, initial_quantity_units,
+                current_quantity_grams, current_quantity_units,
+                unit_cost_paise, source_type, source_ref_id, status, location_id
+              ) VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, 'adjustment', ?, 'active', 1)
+            `).run(
+              retBatchNo,
+              targetVariantId,
+              deltaGrams,
+              deltaUnits,
+              deltaGrams,
+              deltaUnits,
+              item.unit_rate_paise,
+              targetInvoiceId
+            );
+          } catch (e) {}
+        }
+      } else {
+        // Discarded / Spoilage return: log audit movement to ledger without adding back to saleable stock
+        for (const item of returnItems) {
+          const { inventoryLedgerService } = require('../../../inventory/backend/service/inventory_ledger_service');
+          inventoryLedgerService.recordMovement({
+            product_variant_id: item.product_variant_id,
+            branch_id: 1,
+            action_type: 'WASTAGE',
+            quantity_grams: 0,
+            quantity_units: 0,
+            unit_cost_paise: item.unit_rate_paise,
+            reference_type: 'invoice',
+            reference_id: targetInvoiceId,
+            reference_number: originalInvoiceNumber,
+            reason_code: 'spoilage',
+            notes: `Sales return discarded/spoilage (${originalInvoiceNumber}) - ${input.reason || 'Spoilage'}`,
             created_by: managerId,
           });
         }

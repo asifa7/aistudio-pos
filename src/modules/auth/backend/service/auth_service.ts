@@ -98,6 +98,10 @@ export class AuthService {
     return activeSession;
   }
 
+  public setSession(session: UserSession | null): void {
+    activeSession = session;
+  }
+
   public getCurrentUserId(): number {
     if (!activeSession) {
       throw new ConflictError('Unauthorized: No active session');

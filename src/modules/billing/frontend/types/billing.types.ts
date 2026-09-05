@@ -80,7 +80,6 @@ export interface InvoiceItem {
   category: string;
   is_manual_batch_selected?: number;
   manual_batch_allocations?: ManualBatchAllocation[];
-  fulfill_from_fridge?: boolean;
 }
 
 export interface Payment {

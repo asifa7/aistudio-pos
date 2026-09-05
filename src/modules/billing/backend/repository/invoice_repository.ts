@@ -185,6 +185,11 @@ const invoiceRepository = {
 
   searchInvoices(filter: {
     billNumber?: string;
+    searchTerm?: string;
+    customerName?: string;
+    customerPhone?: string;
+    customerId?: number;
+    transactionId?: string;
     itemName?: string;
     quantity?: number;
     minAmount?: number;
@@ -192,41 +197,93 @@ const invoiceRepository = {
     startDate?: string;
     endDate?: string;
     paymentStatus?: string;
+    status?: string;
+    limit?: number;
+    offset?: number;
   }): any[] {
+    const { assertValidDateRange } = require('../../../../core/utils/date_validation');
+    assertValidDateRange(filter.startDate, filter.endDate);
+
     let sql = `
       SELECT DISTINCT i.*, 
              c.name as customer_name,
-             (SELECT COUNT(*) FROM invoice_items WHERE invoice_id = i.id) as item_count
+             c.phone as customer_phone,
+             c.customer_code,
+             (SELECT COUNT(*) FROM invoice_items WHERE invoice_id = i.id) as item_count,
+             (SELECT COALESCE(SUM(amount_paise), 0) FROM payments WHERE invoice_id = i.id) as total_paid_paise,
+             (SELECT COUNT(*) FROM audit_logs WHERE action = 'INVOICE_RETURNED' AND details LIKE '%"invoice_id":' || i.id || '%') as return_log_count
       FROM invoices i
       LEFT JOIN customers c ON c.id = i.customer_id
       LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
-      WHERE i.status IN ('completed', 'void', 'returned')
+      LEFT JOIN payments p ON p.invoice_id = i.id
+      WHERE 1=1
     `;
     const params: any = {};
 
-    const hasBillNum = filter.billNumber && filter.billNumber.trim().length > 0;
+    // Status filter
+    if (filter.status && filter.status !== 'all') {
+      sql += ` AND i.status = @status`;
+      params.status = filter.status;
+    } else {
+      // By default show all non-draft or completed/void/returned bills
+      sql += ` AND i.status IN ('completed', 'void', 'returned', 'held')`;
+    }
 
     if (filter.startDate) {
       sql += ` AND date(i.created_at) >= date(@startDate)`;
-      params.startDate = filter.startDate;
+      params.startDate = filter.startDate.slice(0, 10);
     }
     if (filter.endDate) {
       sql += ` AND date(i.created_at) <= date(@endDate)`;
-      params.endDate = filter.endDate;
+      params.endDate = filter.endDate.slice(0, 10);
     }
-    if (hasBillNum) {
-      const cleanNum = filter.billNumber!.trim().replace(/^#/, '');
-      sql += ` AND (i.invoice_number = @billExact OR CAST(i.id AS TEXT) = @billExact)`;
-      params.billExact = cleanNum;
+
+    // Unified Search Term or Bill Number
+    const rawSearch = (filter.searchTerm || filter.billNumber || '').trim();
+    if (rawSearch) {
+      const cleanNum = rawSearch.replace(/^#/, '');
+      sql += ` AND (
+        i.invoice_number LIKE @searchLike 
+        OR CAST(i.id AS TEXT) = @searchExact
+        OR c.name LIKE @searchLike
+        OR c.phone LIKE @searchLike
+        OR c.customer_code LIKE @searchLike
+        OR p.reference_number LIKE @searchLike
+      )`;
+      params.searchLike = `%${cleanNum}%`;
+      params.searchExact = cleanNum;
     }
+
+    if (filter.customerName && filter.customerName.trim()) {
+      sql += ` AND c.name LIKE @custName`;
+      params.custName = `%${filter.customerName.trim()}%`;
+    }
+
+    if (filter.customerPhone && filter.customerPhone.trim()) {
+      sql += ` AND c.phone LIKE @custPhone`;
+      params.custPhone = `%${filter.customerPhone.trim()}%`;
+    }
+
+    if (filter.customerId) {
+      sql += ` AND i.customer_id = @custId`;
+      params.custId = filter.customerId;
+    }
+
+    if (filter.transactionId && filter.transactionId.trim()) {
+      sql += ` AND (p.reference_number LIKE @txnRef OR CAST(p.id AS TEXT) = @txnRef)`;
+      params.txnRef = `%${filter.transactionId.trim()}%`;
+    }
+
     if (filter.itemName && filter.itemName.trim()) {
       sql += ` AND (ii.product_name LIKE @itemName OR ii.variant_name LIKE @itemName)`;
       params.itemName = `%${filter.itemName.trim()}%`;
     }
+
     if (filter.quantity !== undefined && filter.quantity !== null && !isNaN(filter.quantity) && filter.quantity > 0) {
       sql += ` AND (ii.quantity_units = @qty OR (ii.quantity_grams IS NOT NULL AND ROUND(ii.quantity_grams / 1000.0, 3) = @qty))`;
       params.qty = filter.quantity;
     }
+
     if (filter.minAmount !== undefined && filter.minAmount !== null && !isNaN(filter.minAmount) && filter.minAmount >= 0) {
       sql += ` AND i.total_paise >= @minAmtPaise`;
       params.minAmtPaise = Math.round(filter.minAmount * 100);
@@ -235,15 +292,52 @@ const invoiceRepository = {
       sql += ` AND i.total_paise <= @maxAmtPaise`;
       params.maxAmtPaise = Math.round(filter.maxAmount * 100);
     }
+
     if (filter.paymentStatus && filter.paymentStatus !== 'all') {
       sql += ` AND i.payment_status = @paymentStatus`;
       params.paymentStatus = filter.paymentStatus;
     }
 
-    sql += ` ORDER BY i.id DESC LIMIT 100`;
+    const limit = Math.min(filter.limit || 100, 200);
+    const offset = filter.offset || 0;
+    sql += ` ORDER BY i.id DESC LIMIT ${limit} OFFSET ${offset}`;
 
-    return db.prepare(sql).all(params);
+    const rawRows = db.prepare(sql).all(params) as any[];
+
+    // Derive accurate transaction-based bill status
+    return rawRows.map(row => {
+      let derivedStatus = 'Completed';
+      const isVoid = row.status === 'void' || row.status === 'cancelled';
+      const isPending = row.status === 'draft' || row.status === 'held';
+      const totalPaid = Number(row.total_paid_paise) || 0;
+      const totalPaise = Number(row.total_paise) || 0;
+      const hasReturns = (Number(row.return_log_count) || 0) > 0 || row.status === 'returned';
+
+      if (isVoid) {
+        derivedStatus = 'Cancelled';
+      } else if (isPending) {
+        derivedStatus = 'Pending';
+      } else if (row.status === 'returned') {
+        derivedStatus = 'Fully Returned';
+      } else if (hasReturns) {
+        derivedStatus = totalPaid <= 0 ? 'Fully Returned' : 'Partially Returned';
+      } else if (totalPaid >= totalPaise && totalPaise > 0) {
+        derivedStatus = 'Completed';
+      } else if (totalPaid > 0 && totalPaid < totalPaise) {
+        derivedStatus = 'Partially Paid';
+      } else if (row.payment_status === 'credit' || (row.customer_id && totalPaid === 0)) {
+        derivedStatus = 'Credit';
+      } else if (totalPaid <= 0 && totalPaise > 0) {
+        derivedStatus = 'Unpaid';
+      }
+
+      return {
+        ...row,
+        derived_status: derivedStatus,
+      };
+    });
   },
 };
 
 export { invoiceRepository };
+

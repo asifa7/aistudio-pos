@@ -5,6 +5,7 @@ import { AdjustStockSchema } from '../validation/inventory.schema';
 import { CreatePurchaseSchema } from '../validation/purchase.schema';
 import { authService } from '../../../auth/backend/service/auth_service';
 import { inventoryLedgerService } from './inventory_ledger_service';
+import { assertValidDateRange } from '../../../../core/utils/date_validation';
 import {
   IInventoryRepository,
   ISupplierRepository,
@@ -217,23 +218,7 @@ export class InventoryService {
         created_by: parsed.data.created_by,
       });
 
-      // 3. Update stock ledger running balance
-      this.inventoryRepo.updateLedgerStock(
-        parsed.data.product_variant_id,
-        parsed.data.quantity_grams ?? null,
-        parsed.data.quantity_units ?? null
-      );
-
-      // 4. Create stock transaction record
-      this.inventoryRepo.createTransaction({
-        product_variant_id: parsed.data.product_variant_id,
-        transaction_type: 'manual_adjustment',
-        quantity_grams: parsed.data.quantity_grams ?? null,
-        quantity_units: parsed.data.quantity_units ?? null,
-        reference_id: purchase.id,
-      });
-
-      // 5. Add audit logs record
+      // 3. Add audit logs record
       auditLogger.log(
         parsed.data.created_by,
         'PURCHASE_RECORDED',
@@ -245,18 +230,19 @@ export class InventoryService {
         }
       );
 
-      // 6. Record to unified inventory_ledger
+      // 4. Record to unified inventory ledger, synchronize stock_ledger, and create active FIFO batch
       const { inventoryLedgerService } = require('./inventory_ledger_service');
-      inventoryLedgerService.recordEntry({
+      inventoryLedgerService.recordMovement({
         product_variant_id: parsed.data.product_variant_id,
         branch_id: 1,
-        action_type: 'purchase',
+        action_type: 'PURCHASE',
         quantity_grams: parsed.data.quantity_grams ?? null,
         quantity_units: parsed.data.quantity_units ?? null,
         unit_cost_paise: parsed.data.cost_paise,
         reference_type: 'purchase',
         reference_id: purchase.id,
         reference_number: `PUR-${purchase.id}`,
+        reason_code: 'unrecorded_purchase',
         notes: `Purchase from Supplier #${parsed.data.supplier_id}`,
         created_by: parsed.data.created_by,
       });
@@ -290,49 +276,18 @@ export class InventoryService {
     return this.inventoryRepo.findAllAdjustments(limit);
   }
 
-  public submitPhysicalStockCount(counts: Array<{ product_variant_id: number; counted_quantity: number }>): { adjustedCount: number; timestamp: string } {
+  public submitPhysicalStockCount(counts: Array<{ product_variant_id: number; counted_quantity: number; reason_code?: string }>): { adjustedCount: number; timestamp: string } {
     authService.requireRole(['ADMIN', 'MANAGER', 'CASHIER']);
-    const userId = authService.getCurrentUserId() || 1;
-
-    let adjustedCount = 0;
-    const nowIso = new Date().toISOString();
-
-    dbManager.transaction(() => {
-      const allLedger = this.inventoryRepo.findAllLedger();
-
-      for (const countItem of counts) {
-        const ledgerItem = allLedger.find(l => l.product_variant_id === countItem.product_variant_id);
-        if (!ledgerItem) continue;
-
-        const isWeight = ledgerItem.unit_type === 'weight';
-        const currentQty = isWeight ? (ledgerItem.quantity_grams ?? 0) / 1000 : (ledgerItem.quantity_units ?? 0);
-        const diff = countItem.counted_quantity - currentQty;
-
-        if (Math.abs(diff) < 0.0001) continue;
-
-        const adjustmentType = diff > 0 ? 'stock_in' : 'stock_out';
-        const absDiff = Math.abs(diff);
-
-        const qtyGrams = isWeight ? Math.round(absDiff * 1000) : null;
-        const qtyUnits = !isWeight ? Math.round(absDiff) : null;
-
-        this.adjustStock({
-          product_variant_id: countItem.product_variant_id,
-          adjustment_type: adjustmentType,
-          quantity_grams: qtyGrams,
-          quantity_units: qtyUnits,
-          reason: 'Physical Count Correction',
-          adjusted_by: userId,
-        });
-
-        adjustedCount++;
-      }
-
-      const { stockLedgerRepository } = require('../repository/stock_ledger_repository');
-      stockLedgerRepository.setMetadata('last_physical_count_at', nowIso);
-    });
-
-    return { adjustedCount, timestamp: nowIso };
+    const { physicalAuditService } = require('./physical_audit_service');
+    const { session_id } = physicalAuditService.createSession({ notes: 'Physical Stock Count from POS' });
+    physicalAuditService.saveCounts(session_id, counts.map(c => ({
+      product_variant_id: c.product_variant_id,
+      counted_quantity: c.counted_quantity,
+      reason_code: (c.reason_code as any) || 'measurement_error',
+    })));
+    physicalAuditService.submitSession(session_id);
+    physicalAuditService.approveSession(session_id);
+    return physicalAuditService.applySession(session_id);
   }
 
   public getLastPhysicalCountAt(): string | null {
@@ -469,8 +424,8 @@ export class InventoryService {
       JOIN products p ON p.id = pv.product_id
       LEFT JOIN locations loc ON loc.id = sl.location_id
       WHERE 1=1 ${locationClause} ${categoryClause} 
-      AND p.is_processed_cut = 0 
-      AND pv.parent_variant_id IS NULL
+      AND p.is_inventory_tracked = 1
+      AND p.is_active = 1
       ORDER BY p.category ASC, p.name ASC, pv.variant_name ASC
     `;
 
@@ -524,6 +479,12 @@ export class InventoryService {
       } else {
         // Fallback if no active batch stock
         weightedUnitCostPaise = r.cost_price_paise_per_unit || 0;
+        if (weightedUnitCostPaise <= 0) {
+          const vRow = db.prepare('SELECT last_purchase_cost_paise, unit_cost_paise_cache, current_rate_paise_per_unit FROM product_variants WHERE id = ?').get(r.product_variant_id) as any;
+          if (vRow) {
+            weightedUnitCostPaise = vRow.last_purchase_cost_paise || vRow.unit_cost_paise_cache || Math.round((vRow.current_rate_paise_per_unit || 0) * 0.7);
+          }
+        }
       }
 
       // Total monetary cost value
@@ -651,6 +612,7 @@ export class InventoryService {
       closing_quantity_units: number | null;
     }>;
   } {
+    assertValidDateRange(filter.startDate, filter.endDate);
     const startDate = filter.startDate;
     const endDate = filter.endDate + ' 23:59:59';
 
@@ -822,6 +784,7 @@ export class InventoryService {
     }>;
     grandTotalLossPaise: number;
   } {
+    assertValidDateRange(filter.startDate, filter.endDate);
     const startDate = filter.startDate;
     const endDate = filter.endDate + ' 23:59:59';
 
@@ -951,6 +914,7 @@ export class InventoryService {
       overall_margin_percent: number;
     };
   } {
+    assertValidDateRange(filter.startDate, filter.endDate);
     const startDate = filter.startDate;
     const endDate = filter.endDate + ' 23:59:59';
 
@@ -1172,6 +1136,7 @@ const label = isUnused
           id as batch_id,
           batch_number,
           received_date,
+          original_batch_date,
           created_at,
           current_quantity_grams,
           current_quantity_units,
@@ -1183,7 +1148,7 @@ const label = isUnused
             (current_quantity_grams IS NOT NULL AND current_quantity_grams > 0)
             OR (current_quantity_units IS NOT NULL AND current_quantity_units > 0)
           )
-        ORDER BY COALESCE(received_date, date(created_at)) ASC, id ASC
+        ORDER BY COALESCE(original_batch_date, received_date, date(created_at)) ASC, id ASC
       `).all(prod.product_variant_id) as any[];
 
       let totalQty = 0;
@@ -1197,7 +1162,7 @@ const label = isUnused
           totalQty += bQty;
         }
         const oldest = batches[0];
-        oldestBatchDateStr = oldest.received_date || (oldest.created_at ? String(oldest.created_at).slice(0, 10) : null);
+        oldestBatchDateStr = oldest.original_batch_date || oldest.received_date || (oldest.created_at ? String(oldest.created_at).slice(0, 10) : null);
         oldestBatchNumber = oldest.batch_number || null;
         oldestBatchId = oldest.batch_id || null;
       } else {
@@ -1205,7 +1170,8 @@ const label = isUnused
         const ledgerQty = isWeight ? (prod.ledger_grams || 0) / 1000 : (prod.ledger_units || 0);
         totalQty = Math.max(0, ledgerQty);
         if (totalQty > 0) {
-          oldestBatchDateStr = prod.product_created_at ? String(prod.product_created_at).slice(0, 10) : new Date().toISOString().slice(0, 10);
+          const lastMovement = db.prepare('SELECT date(created_at) as last_date FROM inventory_ledger WHERE product_variant_id = ? ORDER BY id DESC LIMIT 1').get(prod.product_variant_id) as any;
+          oldestBatchDateStr = lastMovement?.last_date || new Date().toISOString().slice(0, 10);
           oldestBatchNumber = 'LEDGER-STOCK';
         }
       }
@@ -1269,6 +1235,16 @@ const label = isUnused
       const deltaGrams = isWeight ? Math.round(input.quantity * 1000) : null;
       const deltaUnits = !isWeight ? input.quantity : null;
 
+      // Fetch variant & product info
+      const variant = db.prepare(`
+        SELECT pv.*, p.id as prod_id, p.name as prod_name, p.product_code 
+        FROM product_variants pv 
+        JOIN products p ON pv.product_id = p.id 
+        WHERE pv.id = ?
+      `).get(input.product_variant_id) as any;
+
+      if (!variant) throw new NotFoundError('Product variant not found');
+
       // 1. If batch ID given, deduct batch stock; otherwise apply FIFO across active batches
       if (input.batch_id) {
         const batch = db.prepare('SELECT * FROM product_stock_batches WHERE id = ?').get(input.batch_id) as any;
@@ -1330,21 +1306,51 @@ const label = isUnused
         reference_id: input.batch_id ?? 0,
       });
 
-      // 4. Log to inventory_ledger
-      inventoryLedgerService.recordEntry({
+      // Generate reference number
+      const cleanDate = new Date().toISOString().slice(0, 10).replace(/[^0-9]/g, '');
+      const countRow = db.prepare(`SELECT COUNT(*) as c FROM inventory_ledger WHERE action_type = 'fridge_removal' AND date(created_at) = date('now')`).get() as any;
+      const seq = String((countRow?.c || 0) + 1).padStart(3, '0');
+      const refNumber = `FRG-OUT-${cleanDate}-${seq}`;
+
+      const userId = input.user_id || authService.getCurrentUserId() || 1;
+      const user = db.prepare('SELECT full_name FROM users WHERE id = ?').get(userId) as any;
+      const userName = user?.full_name || 'Admin / Cashier';
+
+      // 4. Log to inventory_ledger & sync stock balance
+      const ledgerRes = inventoryLedgerService.recordMovement({
         product_variant_id: input.product_variant_id,
         branch_id: branchId,
-        action_type: 'fridge_removal',
-        quantity_grams: deltaGrams !== null ? -deltaGrams : null,
-        quantity_units: deltaUnits !== null ? -deltaUnits : null,
+        action_type: 'FRIDGE_OUT',
+        quantity_grams: deltaGrams,
+        quantity_units: deltaUnits,
+        batch_id: input.batch_id || null,
         reference_type: 'manual',
+        reference_number: refNumber,
         notes: input.reason ? `Fridge Take Out: ${input.reason}` : 'Removed from refrigerator',
-        created_by: input.user_id || authService.getCurrentUserId() || 1,
+        created_by: userId,
       });
+      const ledgerId = ledgerRes.ledger_id;
+
+      const slip = {
+        action_type: 'OUT' as const,
+        reference_number: refNumber,
+        ledger_id: ledgerId,
+        product_name: variant.prod_name,
+        variant_name: variant.variant_name,
+        product_code: variant.product_code || '-',
+        quantity: input.quantity,
+        unit: isWeight ? 'kg' : 'pcs',
+        reason: input.reason || 'Moved to Kitchen Prep',
+        created_at: new Date().toISOString(),
+        user_name: userName,
+      };
 
       return {
         success: true,
         message: `Successfully removed ${input.quantity} ${isWeight ? 'kg' : 'pcs'} from Refrigerator Stock.`,
+        ledger_id: ledgerId,
+        reference_number: refNumber,
+        slip,
       };
     });
   }
@@ -1363,7 +1369,7 @@ const label = isUnused
     notes?: string;
     branch_id?: number;
     user_id?: number;
-  }): { success: boolean; message: string; batch_id: number; batch_number: string } {
+  }): { success: boolean; message: string; batch_id: number; batch_number: string; ledger_id: number; reference_number: string; slip: any } {
     if (!input.quantity || input.quantity <= 0) {
       throw new ValidationError('Addition quantity must be greater than 0');
     }
@@ -1383,7 +1389,7 @@ const label = isUnused
 
       // 2. Fetch variant & product info
       const variant = db.prepare(`
-        SELECT pv.*, p.id as prod_id, p.name as prod_name, p.stock_classification 
+        SELECT pv.*, p.id as prod_id, p.name as prod_name, p.product_code, p.stock_classification 
         FROM product_variants pv 
         JOIN products p ON pv.product_id = p.id 
         WHERE pv.id = ?
@@ -1401,11 +1407,17 @@ const label = isUnused
         : (variant.cost_price_paise_per_unit || 0);
 
       // 3. Insert active batch
+      // 3. Insert active batch with preserved original batch date
+      const originalBatchDate = (input as any).original_batch_date || entryDate;
+      const originalBatchId = (input as any).original_batch_id || null;
+      const isFridgeReturn = Boolean((input as any).is_return || (input as any).original_batch_date);
+
       const insBatch = db.prepare(`
         INSERT INTO product_stock_batches (
           product_variant_id, batch_number, initial_quantity_grams, current_quantity_grams,
-          initial_quantity_units, current_quantity_units, unit_cost_paise, received_date, source_type, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'initial_balance', 'active', CURRENT_TIMESTAMP)
+          initial_quantity_units, current_quantity_units, unit_cost_paise, received_date,
+          original_batch_date, original_batch_id, source_type, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'initial_balance', 'active', CURRENT_TIMESTAMP)
       `).run(
         input.product_variant_id,
         batchNumber,
@@ -1414,44 +1426,61 @@ const label = isUnused
         deltaUnits,
         deltaUnits,
         unitCostPaise,
-        entryDate
+        entryDate,
+        originalBatchDate,
+        originalBatchId
       );
 
       const batchId = insBatch.lastInsertRowid as number;
 
-      // 4. Update running stock in stock_ledger
-      this.inventoryRepo.updateLedgerStock(
-        input.product_variant_id,
-        deltaGrams,
-        deltaUnits
-      );
+      // 4. Generate reference number
+      const inCountRow = db.prepare(`SELECT COUNT(*) as c FROM inventory_ledger WHERE action_type IN ('fridge_deposit', 'FRIDGE_RETURN') AND date(created_at) = date('now')`).get() as any;
+      const inSeq = String((inCountRow?.c || 0) + 1).padStart(3, '0');
+      const refNumber = `FRG-IN-${cleanDate}-${inSeq}`;
 
-      // 5. Create stock transaction
-      this.inventoryRepo.createTransaction({
-        product_variant_id: input.product_variant_id,
-        transaction_type: 'manual_adjustment',
-        quantity_grams: deltaGrams,
-        quantity_units: deltaUnits,
-        reference_id: batchId,
-      });
+      const userId = input.user_id || authService.getCurrentUserId() || 1;
+      const user = db.prepare('SELECT full_name FROM users WHERE id = ?').get(userId) as any;
+      const userName = user?.full_name || 'Admin / Cashier';
 
-      // 6. Log to inventory_ledger
-      inventoryLedgerService.recordEntry({
+      // 5. Log to inventory_ledger and sync stock_ledger balance
+      const ledgerRes = inventoryLedgerService.recordMovement({
         product_variant_id: input.product_variant_id,
         branch_id: branchId,
-        action_type: 'fridge_deposit',
+        action_type: isFridgeReturn ? 'FRIDGE_RETURN' : 'OTHER_IN',
         quantity_grams: deltaGrams,
         quantity_units: deltaUnits,
+        unit_cost_paise: unitCostPaise,
+        batch_id: batchId,
         reference_type: 'manual',
+        reference_number: refNumber,
         notes: input.notes ? `Fridge Deposit: ${input.notes}` : `Stock Added to Refrigerator (#${batchNumber})`,
-        created_by: input.user_id || authService.getCurrentUserId() || 1,
+        created_by: userId,
       });
+      const ledgerId = ledgerRes.ledger_id;
+
+      const slip = {
+        action_type: 'IN' as const,
+        reference_number: refNumber,
+        ledger_id: ledgerId,
+        product_name: variant.prod_name,
+        variant_name: variant.variant_name,
+        product_code: variant.product_code || '-',
+        quantity: input.quantity,
+        unit: isWeight ? 'kg' : 'pcs',
+        reason: input.notes || 'Stock Added to Refrigerator',
+        created_at: new Date().toISOString(),
+        user_name: userName,
+        batch_number: batchNumber,
+      };
 
       return {
         success: true,
         message: `Successfully added ${input.quantity} ${isWeight ? 'kg' : 'pcs'} into Refrigerator Stock (${batchNumber}).`,
         batch_id: batchId,
         batch_number: batchNumber,
+        ledger_id: ledgerId,
+        reference_number: refNumber,
+        slip,
       };
     });
   }
@@ -1459,9 +1488,37 @@ const label = isUnused
   /**
    * Get Cold Storage / Refrigerator In-Out Movement Activity Log
    */
-  public getFridgeActivityLog(filters?: { branchId?: number; limit?: number }): any[] {
+  public getFridgeActivityLog(filters?: { branchId?: number; date?: string; limit?: number }): any[] {
     const branchId = filters?.branchId || 1;
-    const limit = filters?.limit || 50;
+    const dateFilter = filters?.date;
+    const limit = filters?.limit || 100;
+
+    if (dateFilter) {
+      return db.prepare(`
+        SELECT 
+          il.id,
+          il.created_at,
+          il.action_type,
+          il.quantity_grams,
+          il.quantity_units,
+          il.notes,
+          il.reference_type,
+          il.reference_number,
+          p.name as product_name,
+          p.product_code,
+          pv.variant_name,
+          pv.unit_type,
+          u.full_name as user_name
+        FROM inventory_ledger il
+        JOIN product_variants pv ON pv.id = il.product_variant_id
+        JOIN products p ON p.id = pv.product_id
+        LEFT JOIN users u ON u.id = il.created_by
+        WHERE il.branch_id = ? 
+          AND date(il.created_at) = date(?)
+          AND (il.action_type IN ('fridge_deposit', 'fridge_removal') OR il.notes LIKE '%fridge%' OR il.notes LIKE '%refrigerator%')
+        ORDER BY il.created_at ASC, il.id ASC
+      `).all(branchId, dateFilter) as any[];
+    }
 
     return db.prepare(`
       SELECT 
@@ -1472,7 +1529,9 @@ const label = isUnused
         il.quantity_units,
         il.notes,
         il.reference_type,
+        il.reference_number,
         p.name as product_name,
+        p.product_code,
         pv.variant_name,
         pv.unit_type,
         u.full_name as user_name

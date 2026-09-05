@@ -45,6 +45,8 @@ const ROLE_PERMISSIONS: Record<string, UserRole[]> = {
   'billing:print-receipt': ['ADMIN', 'MANAGER', 'CASHIER'],
   'billing:link-customer': ['ADMIN', 'MANAGER', 'CASHIER'],
   'billing:search-invoices': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:delete-invoice': ['ADMIN', 'MANAGER', 'CASHIER'],
+  'billing:verify-action-password': ['ADMIN', 'MANAGER', 'CASHIER'],
 
   // Inventory
   'inventory:get-stock': ['ADMIN', 'MANAGER', 'CASHIER'],

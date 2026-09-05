@@ -17,6 +17,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { IPC_CHANNELS } from '../../../../core/ipc/channels';
 import ProductQuickSearch from './ProductQuickSearch';
 import type { ProductVariant } from '../types/billing.types';
+import DateRangePicker from '../../../../core/shared/DateRangePicker';
 
 interface SalesReturnModalProps {
   isOpen: boolean;
@@ -509,21 +510,29 @@ export default function SalesReturnModal({ isOpen, onClose, initialInvoiceId }: 
 
             {mode === 'search' && !selectedInvoiceId && (
               <div className="flex-1 min-h-0 flex flex-col gap-3">
-                <form onSubmit={handleSearchSubmit} className="p-3.5 bg-surface-card border border-border-subtle rounded-2xl grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs shrink-0">
-                  <div>
-                    <label className="block text-[10px] uppercase font-extrabold text-text-muted mb-1">From Date</label>
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="w-full px-2.5 py-1.5 bg-surface-app border border-border-subtle rounded-xl font-mono outline-none focus:border-brand-500" />
+                <form onSubmit={handleSearchSubmit} className="p-3.5 bg-surface-card border border-border-subtle rounded-2xl flex flex-wrap items-end gap-3 text-xs shrink-0">
+                  <DateRangePicker
+                    startDate={startDate}
+                    endDate={endDate}
+                    onChange={(s, e) => {
+                      setStartDate(s);
+                      setEndDate(e);
+                    }}
+                    labelFrom="From"
+                    labelTo="To"
+                  />
+                  <div className="flex-1 min-w-[140px]">
+                    <label className="block text-[10px] uppercase font-extrabold text-text-muted mb-1">Bill / Customer / Phone</label>
+                    <input
+                      type="text"
+                      value={billNumber}
+                      onChange={e => setBillNumber(e.target.value)}
+                      placeholder="e.g. 101, Rahul, 9884..."
+                      className="w-full px-2.5 py-1.5 bg-surface-app border border-border-subtle rounded-xl font-bold outline-none focus:border-brand-500"
+                    />
                   </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-extrabold text-text-muted mb-1">To Date</label>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="w-full px-2.5 py-1.5 bg-surface-app border border-border-subtle rounded-xl font-mono outline-none focus:border-brand-500" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] uppercase font-extrabold text-text-muted mb-1">Bill Number</label>
-                    <input type="text" value={billNumber} onChange={e => setBillNumber(e.target.value)} placeholder="e.g. 101" className="w-full px-2.5 py-1.5 bg-surface-app border border-border-subtle rounded-xl font-mono font-bold outline-none focus:border-brand-500" />
-                  </div>
-                  <div className="flex items-end gap-2">
-                    <button type="submit" className="bg-brand-500 hover:bg-brand-600 text-white rounded-xl py-2 px-3 text-xs font-bold flex-1">Search</button>
+                  <div className="flex items-center gap-2">
+                    <button type="submit" className="bg-brand-500 hover:bg-brand-600 text-white rounded-xl py-2 px-4 text-xs font-bold shadow-sm transition-all">Search</button>
                     <button type="button" onClick={() => { setStartDate(todayStr); setEndDate(todayStr); setBillNumber(''); }} className="bg-surface-app hover:bg-surface-hover border border-border-subtle rounded-xl py-2 px-3 text-xs font-semibold">Reset</button>
                   </div>
                 </form>
@@ -538,22 +547,42 @@ export default function SalesReturnModal({ isOpen, onClose, initialInvoiceId }: 
                       <thead className="sticky top-0 bg-surface-panel border-b border-border-subtle font-bold text-text-muted text-[10px] uppercase z-10">
                         <tr>
                           <th className="p-3">Bill Number</th>
+                          <th className="p-3">Customer</th>
                           <th className="p-3">Date</th>
                           <th className="p-3 text-right">Total</th>
-                          <th className="p-3"></th>
+                          <th className="p-3 text-center">Status</th>
+                          <th className="p-3 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border-subtle/50">
                         {bills.map(b => (
                           <tr key={b.id} className="hover:bg-surface-hover/50">
                             <td className="p-3 font-mono font-bold text-brand-500">#{b.invoice_number || b.id}</td>
-                            <td className="p-3 font-mono">{new Date(b.created_at).toLocaleDateString()}</td>
+                            <td className="p-3">
+                              <div className="font-bold text-text-primary text-xs">{b.customer_name || 'Walk-in'}</div>
+                              {b.customer_phone && (
+                                <div className="text-[10px] text-text-muted font-mono">{b.customer_phone}</div>
+                              )}
+                            </td>
+                            <td className="p-3 font-mono text-[11px]">{new Date(b.created_at).toLocaleDateString()}</td>
                             <td className="p-3 text-right font-mono font-bold">₹{(b.total_paise / 100).toFixed(2)}</td>
+                            <td className="p-3 text-center">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                                b.derived_status === 'Completed' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                                b.derived_status === 'Cancelled' ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30' :
+                                b.derived_status === 'Fully Returned' ? 'bg-purple-500/15 text-purple-400 border border-purple-500/30' :
+                                b.derived_status === 'Partially Returned' ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30' :
+                                b.derived_status === 'Partially Paid' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' :
+                                'bg-surface-app text-text-muted border border-border-subtle'
+                              }`}>
+                                {b.derived_status || b.status}
+                              </span>
+                            </td>
                             <td className="p-3 text-right">
                               <button 
                                 type="button" 
                                 onClick={() => setSelectedInvoiceId(b.id)} 
-                                className="bg-brand-500 hover:bg-brand-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold"
+                                className="bg-brand-500 hover:bg-brand-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition-all"
                               >
                                 Select
                               </button>
@@ -639,88 +668,129 @@ export default function SalesReturnModal({ isOpen, onClose, initialInvoiceId }: 
           </div>
 
           {/* RIGHT COLUMN: Static Stock Resolution & Master Settings (Permanently visible at all times) */}
-          <div className="lg:col-span-5 flex flex-col gap-4">
+          <div className="lg:col-span-5 flex flex-col gap-4 overflow-y-auto pr-1">
             
             {/* Stock Resolution Card (Always visible, never hidden) */}
-            <div className="bg-surface-card border border-border-subtle rounded-2xl p-4.5 space-y-3 shadow-sm">
-              <label className="block text-[11px] font-extrabold uppercase tracking-wider text-text-muted flex items-center gap-1.5">
-                <PackageCheck size={14} className="text-brand-500" /> Stock Resolution: What happened to items?
-              </label>
+            <div className="bg-surface-card border border-border-subtle rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-sm shrink-0">
+              <div>
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-text-muted flex items-center gap-2">
+                  <PackageCheck size={16} className="text-brand-500 shrink-0" />
+                  <span>Stock Resolution: What happened to items?</span>
+                </label>
+                <p className="text-[11px] text-text-muted mt-0.5">Determine whether returned meat is safe to resell or discarded.</p>
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-2.5">
+              <div className="flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => setStockResolution('discarded')}
-                  className={`p-3 rounded-xl border text-left flex flex-col transition-all cursor-pointer ${
+                  className={`p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all cursor-pointer ${
                     stockResolution === 'discarded'
-                      ? 'border-rose-500/70 bg-rose-500/15 text-text-primary shadow-sm ring-1 ring-rose-500/40'
+                      ? 'border-rose-500 bg-rose-500/15 text-text-primary shadow-sm ring-1 ring-rose-500/50'
                       : 'border-border-subtle bg-surface-app hover:bg-surface-hover text-text-muted'
                   }`}
                 >
-                  <span className="text-xs font-black flex items-center gap-2 text-rose-400">
-                    🗑️ Discarded / Spoilage
-                  </span>
-                  <span className="text-[11px] opacity-80 mt-1">Damaged, raw cut spoiled — do NOT add back to inventory.</span>
+                  <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
+                    🗑️
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-extrabold block text-rose-400">
+                      Discarded / Spoilage
+                    </span>
+                    <span className="text-[11px] text-text-secondary block mt-0.5 leading-snug">
+                      Damaged or spoiled cut — do NOT add back to inventory.
+                    </span>
+                  </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setStockResolution('restored')}
-                  className={`p-3 rounded-xl border text-left flex flex-col transition-all cursor-pointer ${
+                  className={`p-3.5 rounded-xl border text-left flex items-start gap-3 transition-all cursor-pointer ${
                     stockResolution === 'restored'
-                      ? 'border-emerald-500/70 bg-emerald-500/15 text-text-primary shadow-sm ring-1 ring-emerald-500/40'
+                      ? 'border-emerald-500 bg-emerald-500/15 text-text-primary shadow-sm ring-1 ring-emerald-500/50'
                       : 'border-border-subtle bg-surface-app hover:bg-surface-hover text-text-muted'
                   }`}
                 >
-                  <span className="text-xs font-black flex items-center gap-2 text-emerald-400">
-                    📦 Add Back to Stock
-                  </span>
-                  <span className="text-[11px] opacity-80 mt-1">Good resellable condition — restore inventory stock counts.</span>
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 mt-0.5">
+                    📦
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span className="text-xs font-extrabold block text-emerald-400">
+                      Add Back to Stock
+                    </span>
+                    <span className="text-[11px] text-text-secondary block mt-0.5 leading-snug">
+                      Good resellable condition — restore inventory stock counts.
+                    </span>
+                  </div>
                 </button>
               </div>
             </div>
 
             {/* Refund Payout & Reason Settings (Always visible, never hidden) */}
-            <div className="bg-surface-card border border-border-subtle rounded-2xl p-4.5 space-y-4 shadow-sm flex-1 flex flex-col justify-between">
-              <div className="space-y-3.5">
-                <div>
-                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-text-muted mb-1.5 flex items-center gap-1.5">
-                    <DollarSign size={14} className="text-brand-500" /> Refund Payout Method
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <select
-                      value={refundGiven ? 'yes' : 'no'}
-                      onChange={e => setRefundGiven(e.target.value === 'yes')}
-                      className="bg-surface-app border border-border-subtle rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-brand-500"
-                    >
-                      <option value="yes">Yes, refund</option>
-                      <option value="no">No refund</option>
-                    </select>
+            <div className="bg-surface-card border border-border-subtle rounded-2xl p-4 sm:p-5 space-y-4 shadow-sm shrink-0">
+              <div>
+                <label className="block text-xs font-extrabold uppercase tracking-wider text-text-muted flex items-center gap-2">
+                  <DollarSign size={16} className="text-brand-500 shrink-0" />
+                  <span>Refund Payout Method</span>
+                </label>
+                <p className="text-[11px] text-text-muted mt-0.5">Specify if physical refund or credit is issued to customer.</p>
+              </div>
 
-                    {refundGiven && (
-                      <select
-                        value={refundMethod}
-                        onChange={e => setRefundMethod(e.target.value as any)}
-                        className="bg-surface-app border border-border-subtle rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-brand-500"
-                      >
-                        <option value="cash">💵 Cash Outflow</option>
-                        <option value="credit_balance">👤 Store Credit (CRM)</option>
-                        <option value="credit_note">🎟️ Credit Note</option>
-                      </select>
-                    )}
+              <div className="space-y-3">
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-bold text-text-secondary">Issue Refund?</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setRefundGiven(true)}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                        refundGiven
+                          ? 'bg-brand-500 border-brand-500 text-white shadow-sm'
+                          : 'bg-surface-app border-border-subtle text-text-secondary hover:bg-surface-hover'
+                      }`}
+                    >
+                      ✓ Yes, Refund
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRefundGiven(false)}
+                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all ${
+                        !refundGiven
+                          ? 'bg-brand-500 border-brand-500 text-white shadow-sm'
+                          : 'bg-surface-app border-border-subtle text-text-secondary hover:bg-surface-hover'
+                      }`}
+                    >
+                      ✕ No Refund
+                    </button>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-extrabold uppercase tracking-wider text-text-muted mb-1.5">
+                {refundGiven && (
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] font-bold text-text-secondary">Payout Channel</label>
+                    <select
+                      value={refundMethod}
+                      onChange={e => setRefundMethod(e.target.value as any)}
+                      className="w-full bg-surface-app border border-border-subtle rounded-xl px-3 py-2.5 text-xs font-bold text-text-primary outline-none focus:border-brand-500 cursor-pointer transition-colors"
+                    >
+                      <option value="cash">💵 Cash Outflow (Draw from Cash Box)</option>
+                      <option value="credit_balance">👤 Store Credit (Add to Customer Balance)</option>
+                      <option value="credit_note">🎟️ Credit Note (Issue Credit Slip)</option>
+                    </select>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-bold text-text-secondary">
                     Reason for Return *
                   </label>
                   <input
                     type="text"
                     value={reason}
                     onChange={e => setReason(e.target.value)}
-                    placeholder="e.g. Quality issue, customer requested return"
-                    className="w-full bg-surface-app border border-border-subtle rounded-xl px-3 py-2 text-xs font-semibold outline-none focus:border-brand-500"
+                    placeholder="e.g. Quality issue, customer changed mind"
+                    className="w-full bg-surface-app border border-border-subtle rounded-xl px-3 py-2 text-xs font-semibold text-text-primary outline-none focus:border-brand-500 transition-colors"
                   />
                 </div>
               </div>
@@ -729,13 +799,13 @@ export default function SalesReturnModal({ isOpen, onClose, initialInvoiceId }: 
               {errorMsg && (
                 <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold flex items-center gap-2">
                   <AlertCircle size={15} className="shrink-0" />
-                  <span>{errorMsg}</span>
+                  <span className="break-words">{errorMsg}</span>
                 </div>
               )}
               {successMsg && (
                 <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-semibold flex items-center gap-2">
                   <CheckCircle2 size={15} className="shrink-0" />
-                  <span>{successMsg}</span>
+                  <span className="break-words">{successMsg}</span>
                 </div>
               )}
             </div>

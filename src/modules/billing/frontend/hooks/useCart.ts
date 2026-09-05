@@ -19,7 +19,6 @@ interface CartState {
     override_reason?: string | null;
     overridden_by?: number | null;
   }) => Promise<void>;
-  toggleFulfillFromFridge: (itemId: number) => void;
   updateItemQuantity: (itemId: number, quantityGrams: number | null, quantityUnits: number | null) => Promise<void>;
   updateItemManualAllocations: (itemId: number, allocations: any[]) => void;
   removeItem: (itemId: number) => Promise<void>;
@@ -99,16 +98,6 @@ export const useCart = create<CartState>((set, get) => ({
     applyInvoiceData(set, data);
   },
 
-  toggleFulfillFromFridge: (itemId) => {
-    set(state => ({
-      items: state.items.map(item =>
-        item.id === itemId
-          ? { ...item, fulfill_from_fridge: !item.fulfill_from_fridge }
-          : item
-      )
-    }));
-  },
-
   updateItemManualAllocations: (itemId, allocations) => {
     set(state => ({
       items: state.items.map(item =>
@@ -156,27 +145,6 @@ export const useCart = create<CartState>((set, get) => ({
 
       const payload: any = { invoiceId: activeInvoiceId, items: itemsWithManual, ...opts };
       const data = await invokeIPC(IPC_CHANNELS.BILLING.COMPLETE_INVOICE, payload);
-
-      // Automatically deduct from refrigerator stock for any line items marked with the fridge icon
-      for (const item of items) {
-        if (item.fulfill_from_fridge) {
-          const qty = item.unit_type === 'weight' || item.unit_type === 'live_dual'
-            ? (item.quantity_grams ?? 0) / 1000
-            : (item.quantity_units ?? 0);
-          if (qty > 0) {
-            try {
-              await window.api.invoke(IPC_CHANNELS.INVENTORY.RECORD_FRIDGE_REMOVAL, {
-                product_variant_id: item.product_variant_id,
-                quantity: qty,
-                unit_type: item.unit_type,
-                reason: `Direct Sale: Billed on Invoice #${data.invoice?.invoice_number || activeInvoiceId}`,
-              });
-            } catch (fridgeErr) {
-              console.warn('[Fridge stock deduction on billing non-fatal]:', fridgeErr);
-            }
-          }
-        }
-      }
 
       set(() => ({ activeInvoiceId: null, activeInvoice: null, items: [], isGstInvoice: false, isLoading: false }));
       return data;

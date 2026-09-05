@@ -1,63 +1,196 @@
-import { useState } from 'react';
-import { BarChart3, Clock, FileText, Landmark } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import {
+  BarChart3,
+  Clock,
+  FileText,
+  Landmark,
+  Printer,
+  Download,
+  Search,
+  Filter,
+  CheckCircle2,
+  Calendar,
+  Layers,
+  ArrowRight
+} from 'lucide-react';
 import OutstandingDashboard from './OutstandingDashboard';
 import AgingDashboard from './AgingDashboard';
 import CustomerSearch from './CustomerSearch';
 import { useARReports } from '../hooks/useCustomerLedger';
 import { formatPaise, formatDate, getLedgerRefLabel } from '../types/customer.types';
-import type { Customer } from '../types/customer.types';
+import type { Customer, CustomerStatement } from '../types/customer.types';
 
 type Tab = 'dashboard' | 'aging' | 'statement' | 'collections';
 
 export default function ARReportsView() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
-  
-  // Statement selectors
-  const [selectedCust, setSelectedCust] = useState<Customer | null>(null);
-  const [stmtStart, setStmtStart] = useState('');
-  const [stmtEnd, setStmtEnd] = useState('');
-  const [isStatementLoaded, setIsStatementLoaded] = useState(false);
 
-  // Collections state
+  // ─── Statement State ─────────────────────────────────────────
+  const [selectedCust, setSelectedCust] = useState<Customer | null>(null);
   const today = new Date().toISOString().split('T')[0];
-  const [colStart, setColStart] = useState(today);
+  const firstDayOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0];
+  
+  const [stmtStart, setStmtStart] = useState(firstDayOfMonth);
+  const [stmtEnd, setStmtEnd] = useState(today);
+  const [statementData, setStatementData] = useState<CustomerStatement | null>(null);
+  const [isStmtLoading, setIsStmtLoading] = useState(false);
+  const [stmtError, setStmtError] = useState<string | null>(null);
+
+  // ─── Collections State ───────────────────────────────────────
+  const [colStart, setColStart] = useState(firstDayOfMonth);
   const [colEnd, setColEnd] = useState(today);
+  const [colCustomer, setColCustomer] = useState<Customer | null>(null);
+  const [colMethod, setColMethod] = useState<string>('all');
 
   const { useCollectionReport } = useARReports();
-  const { data: collectionSummary, refetch: refetchCol } = useCollectionReport(colStart, colEnd);
+  const { data: collectionReport, isLoading: isColLoading, refetch: refetchCol } = useCollectionReport({
+    startDate: colStart,
+    endDate: colEnd,
+    customerId: colCustomer ? colCustomer.id : undefined,
+    method: colMethod !== 'all' ? colMethod : undefined,
+  });
 
-  // Statement fetching directly
-  const [statementData, setStatementData] = useState<any>(null);
-  const [isStmtLoading, setIsStmtLoading] = useState(false);
-
-  const handleFetchStatement = async () => {
-    if (!selectedCust || !stmtStart || !stmtEnd) return;
+  // Fetch statement
+  const handleFetchStatement = async (cust?: Customer) => {
+    const targetCust = cust || selectedCust;
+    if (!targetCust || !stmtStart || !stmtEnd) return;
     setIsStmtLoading(true);
+    setStmtError(null);
     try {
-      const res = await window.api.invoke('customers:get-statement', {
-        customer_id: selectedCust.id,
+      const res = (await window.api.invoke('customers:get-statement', {
+        customer_id: targetCust.id,
         startDate: stmtStart,
-        endDate: stmtEnd
-      }) as { success: boolean; data?: any };
+        endDate: stmtEnd,
+      })) as { success: boolean; data?: CustomerStatement; error?: string };
       if (res.success && res.data) {
         setStatementData(res.data);
-        setIsStatementLoaded(true);
+      } else {
+        setStmtError(res.error || 'Failed to fetch statement');
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setStmtError(err.message || 'Error fetching customer statement');
     } finally {
       setIsStmtLoading(false);
     }
   };
 
-  const handlePrintStatement = () => {
-    window.print();
+  // Quick date presets for statements
+  const handleSetStmtPreset = (preset: 'this_month' | 'last_month' | 'last_30' | 'fy' | 'all') => {
+    const now = new Date();
+    if (preset === 'this_month') {
+      setStmtStart(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]);
+      setStmtEnd(today);
+    } else if (preset === 'last_month') {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+      const last = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+      setStmtStart(first);
+      setStmtEnd(last);
+    } else if (preset === 'last_30') {
+      const past = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      setStmtStart(past);
+      setStmtEnd(today);
+    } else if (preset === 'fy') {
+      const currentYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+      setStmtStart(`${currentYear}-04-01`);
+      setStmtEnd(today);
+    } else if (preset === 'all') {
+      setStmtStart('2020-01-01');
+      setStmtEnd(today);
+    }
+  };
+
+  // Quick date presets for collections
+  const handleSetColPreset = (preset: 'today' | 'yesterday' | 'last_7' | 'this_month' | 'last_month') => {
+    const now = new Date();
+    if (preset === 'today') {
+      setColStart(today);
+      setColEnd(today);
+    } else if (preset === 'yesterday') {
+      const y = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      setColStart(y);
+      setColEnd(y);
+    } else if (preset === 'last_7') {
+      const p7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      setColStart(p7);
+      setColEnd(today);
+    } else if (preset === 'this_month') {
+      setColStart(new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]);
+      setColEnd(today);
+    } else if (preset === 'last_month') {
+      const first = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+      const last = new Date(now.getFullYear(), now.getMonth(), 0).toISOString().split('T')[0];
+      setColStart(first);
+      setColEnd(last);
+    }
+  };
+
+  // Export Statement CSV
+  const handleExportStatementCSV = () => {
+    if (!statementData) return;
+    const header = ['Date', 'Entry Type', 'Invoice / Ref #', 'Description', 'Debit (₹)', 'Credit (₹)', 'Running Balance (₹)'];
+    const csvRows = statementData.entries.map((e) => [
+      e.entry_date,
+      getLedgerRefLabel(e.ref_type),
+      e.invoice_number || e.ref_id || '',
+      `"${(e.description || '').replace(/"/g, '""')}"`,
+      (e.debit_paise / 100).toFixed(2),
+      (e.credit_paise / 100).toFixed(2),
+      (e.running_balance_paise / 100).toFixed(2),
+    ]);
+
+    const fileContent =
+      `Customer Statement: ${statementData.customer.name} (${statementData.customer.customer_code})\n` +
+      `Period: ${statementData.startDate} to ${statementData.endDate}\n` +
+      `Opening Balance: ${(statementData.opening_balance_paise / 100).toFixed(2)}\n` +
+      `Closing Balance: ${(statementData.closing_balance_paise / 100).toFixed(2)}\n\n` +
+      [header.join(','), ...csvRows.map((r) => r.join(','))].join('\n');
+
+    const blob = new Blob([fileContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Statement_${statementData.customer.customer_code}_${statementData.startDate}_${statementData.endDate}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Export Collections CSV
+  const handleExportCollectionsCSV = () => {
+    if (!collectionReport || !collectionReport.payments) return;
+    const header = ['Payment Date', 'Customer Code', 'Customer Name', 'Method', 'Reference #', 'Collected By', 'Allocations', 'Amount Paid (₹)', 'On-Account (₹)'];
+    const csvRows = collectionReport.payments.map((p) => {
+      const allocSummary = p.allocations.map((a) => `${a.invoice_number} (₹${(a.allocated_paise / 100).toFixed(2)})`).join('; ') || 'On-Account';
+      return [
+        p.payment_date,
+        p.customer_code,
+        `"${p.customer_name.replace(/"/g, '""')}"`,
+        p.method.toUpperCase(),
+        p.reference_number || '',
+        p.received_by_display || '',
+        `"${allocSummary.replace(/"/g, '""')}"`,
+        (p.amount_paise / 100).toFixed(2),
+        (p.unallocated_paise / 100).toFixed(2),
+      ];
+    });
+
+    const fileContent =
+      `Customer Collections Report: ${colStart} to ${colEnd}\n` +
+      `Total Collected: ${(collectionReport.total_collected_paise / 100).toFixed(2)}\n\n` +
+      [header.join(','), ...csvRows.map((r) => r.join(','))].join('\n');
+
+    const blob = new Blob([fileContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Collections_${colStart}_${colEnd}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="h-full flex flex-col select-none text-xs text-text-secondary">
-      {/* Sub-nav Tabs */}
-      <div className="flex border-b border-border-subtle bg-surface-panel px-6">
+      {/* Navigation Sub-Tabs */}
+      <div className="flex border-b border-border-subtle bg-surface-card px-6 print:hidden">
         {[
           { id: 'dashboard', label: 'Outstanding Dashboard', icon: <Landmark size={14} /> },
           { id: 'aging', label: 'Aging Schedule', icon: <Clock size={14} /> },
@@ -67,10 +200,10 @@ export default function ARReportsView() {
           <button
             key={t.id}
             onClick={() => setActiveTab(t.id as Tab)}
-            className={`flex items-center gap-2 py-3 px-4 border-b-2 font-semibold transition-colors ${
+            className={`flex items-center gap-2 py-3 px-4 border-b-2 font-bold text-xs transition-colors ${
               activeTab === t.id
-                ? 'border-accent text-accent'
-                : 'border-transparent text-text-secondary hover:text-white'
+                ? 'border-brand-500 text-brand-600 dark:text-brand-400 bg-brand-500/10'
+                : 'border-transparent text-text-secondary hover:text-text-primary'
             }`}
           >
             {t.icon}
@@ -82,241 +215,560 @@ export default function ARReportsView() {
       {/* Tab Panels */}
       <div className="flex-1 overflow-hidden">
         {activeTab === 'dashboard' && (
-          <OutstandingDashboard onSelectCustomer={() => {}} />
+          <OutstandingDashboard
+            onSelectCustomer={(c) => {
+              setSelectedCust(c);
+              setActiveTab('statement');
+              handleFetchStatement(c);
+            }}
+          />
         )}
 
-        {activeTab === 'aging' && (
-          <AgingDashboard />
-        )}
+        {activeTab === 'aging' && <AgingDashboard />}
 
+        {/* ─── SECTION B: CUSTOMER STATEMENTS ───────────────────────── */}
         {activeTab === 'statement' && (
-          <div className="h-full overflow-auto p-6 space-y-5">
+          <div className="h-full overflow-auto p-6 space-y-6">
             {/* Input Toolbar */}
-            <div className="bg-surface-panel border border-border-subtle p-4 rounded-xl flex flex-wrap items-end gap-4 print:hidden">
-              <div className="w-64">
-                <label className="block text-[10px] text-text-secondary mb-1">Select Customer</label>
-                <CustomerSearch value={selectedCust} onChange={setSelectedCust} showBalance={false} />
+            <div className="bg-surface-card border border-border-subtle p-5 rounded-2xl flex flex-wrap items-end justify-between gap-4 print:hidden shadow-sm">
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="w-72">
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Select Customer *</label>
+                  <CustomerSearch
+                    value={selectedCust}
+                    onChange={(c) => {
+                      setSelectedCust(c);
+                      setStatementData(null);
+                    }}
+                    showBalance={true}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Period From</label>
+                  <input
+                    type="date"
+                    value={stmtStart}
+                    onChange={(e) => setStmtStart(e.target.value)}
+                    className="bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-text-primary font-mono text-xs shadow-sm focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Period To</label>
+                  <input
+                    type="date"
+                    value={stmtEnd}
+                    onChange={(e) => setStmtEnd(e.target.value)}
+                    className="bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-text-primary font-mono text-xs shadow-sm focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <button
+                  onClick={() => handleFetchStatement()}
+                  disabled={!selectedCust || !stmtStart || !stmtEnd || isStmtLoading}
+                  className="px-5 py-2.5 bg-brand-500 hover:bg-brand-400 rounded-xl text-white font-bold text-xs transition-colors disabled:opacity-40 shadow-sm flex items-center gap-1.5"
+                >
+                  <Search size={14} />
+                  <span>{isStmtLoading ? 'Loading Statement...' : 'Generate Statement'}</span>
+                </button>
               </div>
-              <div>
-                <label className="block text-[10px] text-text-secondary mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={stmtStart}
-                  onChange={(e) => setStmtStart(e.target.value)}
-                  className="bg-surface-app border border-border-subtle rounded-lg px-3 py-2 text-white"
-                />
+
+              {/* Quick Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[10px] text-text-muted font-bold mr-1">Quick Range:</span>
+                {[
+                  { id: 'this_month', label: 'This Month' },
+                  { id: 'last_month', label: 'Last Month' },
+                  { id: 'last_30', label: 'Last 30 Days' },
+                  { id: 'fy', label: 'Financial Year' },
+                  { id: 'all', label: 'All Time' },
+                ].map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => handleSetStmtPreset(p.id as any)}
+                    className="px-2.5 py-1 rounded-lg bg-surface-panel hover:bg-surface-hover border border-border-subtle text-[10px] font-medium text-text-secondary hover:text-text-primary transition-colors"
+                  >
+                    {p.label}
+                  </button>
+                ))}
               </div>
-              <div>
-                <label className="block text-[10px] text-text-secondary mb-1">End Date</label>
-                <input
-                  type="date"
-                  value={stmtEnd}
-                  onChange={(e) => setStmtEnd(e.target.value)}
-                  className="bg-surface-app border border-border-subtle rounded-lg px-3 py-2 text-white"
-                />
-              </div>
-              <button
-                onClick={handleFetchStatement}
-                disabled={!selectedCust || !stmtStart || !stmtEnd || isStmtLoading}
-                className="px-4 py-2 bg-accent hover:bg-brand-500 rounded-lg text-white font-bold transition-colors disabled:opacity-30"
-              >
-                {isStmtLoading ? 'Loading...' : 'Generate Statement'}
-              </button>
             </div>
 
-            {/* Statement Printable sheet */}
-            {isStatementLoaded && statementData && (
-              <div className="bg-surface-panel border border-border-subtle rounded-xl p-6 space-y-6 print:border-0 print:bg-white print:text-black">
-                
-                {/* Print button toolbar */}
-                <div className="flex justify-end gap-2 print:hidden border-b border-border-subtle pb-4">
-                  <button
-                    onClick={handlePrintStatement}
-                    className="px-3 py-1.5 bg-accent text-white hover:bg-brand-500 rounded-md font-bold flex items-center gap-1.5 transition-colors"
-                  >
-                    <PrinterIcon size={14} />
-                    Print Statement
-                  </button>
-                </div>
-
-                {/* Print Invoice Header */}
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h2 className="text-base font-bold text-white print:text-black uppercase">ACCOUNT STATEMENT</h2>
-                    <p className="text-[10px] text-text-secondary print:text-slate-500 font-mono mt-0.5">
-                      Period: {formatDate(statementData.startDate)} to {formatDate(statementData.endDate)}
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <h3 className="text-xs font-bold text-white print:text-black">{statementData.customer.name}</h3>
-                    <p className="text-[10px] text-text-secondary print:text-slate-500 font-mono mt-0.5">{statementData.customer.customer_code}</p>
-                    {statementData.customer.phone && <p className="text-[10px] text-text-secondary print:text-slate-500 font-mono">{statementData.customer.phone}</p>}
-                  </div>
-                </div>
-
-                {/* Balance summaries */}
-                <div className="grid grid-cols-4 gap-3 bg-surface-app/40 border border-border-subtle rounded-lg p-3 print:bg-slate-100 print:border-slate-300 print:text-black">
-                  <div>
-                    <span className="text-[10px] text-text-secondary print:text-slate-600">Opening Balance</span>
-                    <p className="font-mono text-white font-bold mt-1 print:text-black">{formatPaise(statementData.opening_balance_paise)}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-text-secondary print:text-slate-600">Total DR (Debits)</span>
-                    <p className="font-mono text-red-400 font-bold mt-1 print:text-red-700">+{formatPaise(statementData.total_debits_paise)}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-text-secondary print:text-slate-600">Total CR (Credits)</span>
-                    <p className="font-mono text-brand-500 font-bold mt-1 print:text-emerald-700">-{formatPaise(statementData.total_credits_paise)}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-text-secondary print:text-slate-600">Closing Balance</span>
-                    <p className="font-mono text-white font-bold mt-1 print:text-black">{formatPaise(statementData.closing_balance_paise)}</p>
-                  </div>
-                </div>
-
-                {/* Details Table */}
-                <table className="w-full text-xs text-left">
-                  <thead>
-                    <tr className="border-b-2 border-border-subtle bg-surface-app/40 print:bg-slate-200 print:border-slate-300 text-[10px]">
-                      <th className="px-3 py-2 text-text-secondary font-semibold print:text-black">Date</th>
-                      <th className="px-3 py-2 text-text-secondary font-semibold print:text-black">Type</th>
-                      <th className="px-4 py-2 text-text-secondary font-semibold print:text-black">Description</th>
-                      <th className="px-3 py-2 text-right text-red-400 font-semibold print:text-red-700">Debit (DR)</th>
-                      <th className="px-3 py-2 text-right text-brand-500 font-semibold print:text-emerald-700">Credit (CR)</th>
-                      <th className="px-3 py-2 text-right text-text-secondary font-semibold print:text-black">Balance</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border-subtle print:divide-slate-200">
-                    {statementData.entries.length === 0 ? (
-                      <tr>
-                        <td colSpan={6} className="text-center py-8 text-text-secondary">No transactions in this period</td>
-                      </tr>
-                    ) : (
-                      statementData.entries.map((r: any) => (
-                        <tr key={r.id}>
-                          <td className="px-3 py-2 font-mono text-white print:text-black">{formatDate(r.entry_date)}</td>
-                          <td className="px-3 py-2 font-semibold text-[10px] uppercase text-text-secondary print:text-black">{getLedgerRefLabel(r.ref_type as any)}</td>
-                          <td className="px-4 py-2 text-white/90 print:text-black">{r.description}</td>
-                          <td className="px-3 py-2 text-right font-mono text-red-400 print:text-red-600">
-                            {r.debit_paise > 0 ? `+${formatPaise(r.debit_paise)}` : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono text-brand-500 print:text-emerald-700">
-                            {r.credit_paise > 0 ? `-${formatPaise(r.credit_paise)}` : '—'}
-                          </td>
-                          <td className="px-3 py-2 text-right font-mono font-bold text-white print:text-black">{formatPaise(r.running_balance_paise)}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+            {stmtError && (
+              <div className="p-4 rounded-xl bg-red-100 dark:bg-red-500/10 border border-red-300 dark:border-red-500/30 text-red-800 dark:text-red-400 text-xs font-semibold print:hidden">
+                {stmtError}
               </div>
             )}
-          </div>
-        )}
 
-        {activeTab === 'collections' && (
-          <div className="h-full overflow-auto p-6 space-y-5">
-            {/* Range selection */}
-            <div className="bg-surface-panel border border-border-subtle p-4 rounded-xl flex flex-wrap items-end gap-4">
-              <div>
-                <label className="block text-[10px] text-text-secondary mb-1">Start Date</label>
-                <input
-                  type="date"
-                  value={colStart}
-                  onChange={(e) => setColStart(e.target.value)}
-                  className="bg-surface-app border border-border-subtle rounded-lg px-3 py-2 text-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-text-secondary mb-1">End Date</label>
-                <input
-                  type="date"
-                  value={colEnd}
-                  onChange={(e) => setColEnd(e.target.value)}
-                  className="bg-surface-app border border-border-subtle rounded-lg px-3 py-2 text-white"
-                />
-              </div>
-              <button
-                onClick={() => refetchCol()}
-                className="px-4 py-2 bg-accent hover:bg-brand-500 rounded-lg text-white font-bold transition-colors"
-              >
-                Fetch Collections
-              </button>
-            </div>
+            {/* Standalone A4 Formal Customer Statement */}
+            {statementData && (
+              <div className="space-y-4">
+                {/* Print/Export Bar */}
+                <div className="flex items-center justify-between print:hidden bg-surface-card border border-border-subtle p-3 rounded-xl shadow-sm">
+                  <div className="flex items-center gap-2 text-text-primary font-bold">
+                    <FileText size={16} className="text-brand-500" />
+                    <span>
+                      Customer Statement: {statementData.customer.name} ({statementData.customer.customer_code})
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleExportStatementCSV}
+                      className="px-3 py-1.5 bg-surface-panel hover:bg-surface-hover border border-border-subtle rounded-lg font-bold text-xs text-text-primary flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Download size={14} className="text-emerald-500" />
+                      <span>Export CSV</span>
+                    </button>
+                    <button
+                      onClick={() => window.print()}
+                      className="px-4 py-1.5 bg-brand-500 text-white hover:bg-brand-400 rounded-lg font-bold text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                    >
+                      <Printer size={14} />
+                      <span>Print A4 Statement</span>
+                    </button>
+                  </div>
+                </div>
 
-            {/* Metrics cards */}
-            {!!collectionSummary && (() => {
-              const colData = collectionSummary as any;
-              return (
-                <>
-                  <div className="grid grid-cols-6 gap-3">
-                    <div className="bg-surface-panel border border-border-subtle rounded-xl p-3 col-span-2">
-                      <p className="text-[10px] text-text-secondary font-medium">TOTAL RECEIVED</p>
-                      <p className="text-base font-mono font-bold text-brand-500 mt-1">{formatPaise(colData.total_collected_paise)}</p>
-                    </div>
-                    {Object.entries(colData.by_method).map(([method, val]: any) => (
-                      <div key={method} className="bg-surface-panel border border-border-subtle rounded-xl p-3">
-                        <p className="text-[10px] text-text-secondary font-medium capitalize">{method.replace('_', ' ')}</p>
-                        <p className="text-xs font-mono font-bold text-white mt-1">{formatPaise(val)}</p>
+                {/* Printable Document (A4 Styled) */}
+                <div className="bg-white text-black p-8 rounded-2xl border border-gray-200 shadow-md space-y-6 font-sans print:border-0 print:p-0 print:shadow-none print:m-0 print:w-full">
+                  {/* Formal Header: Shop & Customer Details */}
+                  <div className="border-b-2 border-gray-800 pb-5">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h1 className="text-2xl font-black text-gray-900 tracking-tight">
+                          {statementData.shopInfo?.name || 'PREMIUM MEAT SHOP'}
+                        </h1>
+                        <p className="text-xs text-gray-600 mt-1">{statementData.shopInfo?.address}</p>
+                        <div className="text-[11px] text-gray-600 font-mono mt-0.5 space-x-3">
+                          {statementData.shopInfo?.phone && <span>Phone: {statementData.shopInfo.phone}</span>}
+                          {statementData.shopInfo?.gstin && <span>GSTIN: {statementData.shopInfo.gstin}</span>}
+                        </div>
                       </div>
-                    ))}
+
+                      <div className="text-right">
+                        <span className="inline-block px-3 py-1 bg-gray-900 text-white font-extrabold text-xs uppercase tracking-widest rounded">
+                          STATEMENT OF ACCOUNT
+                        </span>
+                        <p className="text-xs font-mono font-bold text-gray-800 mt-2">
+                          Date: {formatDate(today)}
+                        </p>
+                        <p className="text-[11px] font-mono text-gray-600">
+                          Period: {formatDate(statementData.startDate)} – {formatDate(statementData.endDate)}
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Collection transaction logs */}
-                  <div className="bg-surface-panel border border-border-subtle rounded-xl overflow-hidden">
-                    <div className="px-4 py-3 border-b border-border-subtle flex items-center justify-between">
-                      <h3 className="font-semibold text-white">Payment Collections Log</h3>
+                  {/* Customer Information Block */}
+                  <div className="grid grid-cols-2 gap-6 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                    <div>
+                      <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">Statement For:</span>
+                      <h3 className="text-sm font-extrabold text-gray-900 mt-0.5">{statementData.customer.name}</h3>
+                      {statementData.customer.business_name && (
+                        <p className="text-xs font-semibold text-gray-700">{statementData.customer.business_name}</p>
+                      )}
+                      <p className="text-[11px] font-mono text-gray-600 mt-0.5">Code: {statementData.customer.customer_code}</p>
+                      {statementData.customer.phone && (
+                        <p className="text-[11px] font-mono text-gray-600">Phone: {statementData.customer.phone}</p>
+                      )}
                     </div>
-                    <table className="w-full text-left">
+
+                    <div className="text-right flex flex-col justify-between">
+                      <div>
+                        {statementData.customer.gstin && (
+                          <p className="text-[11px] font-mono text-gray-700">GSTIN: {statementData.customer.gstin}</p>
+                        )}
+                        {statementData.customer.billing_address_line1 && (
+                          <p className="text-xs text-gray-600 mt-0.5">
+                            {statementData.customer.billing_address_line1}, {statementData.customer.billing_city}
+                          </p>
+                        )}
+                      </div>
+                      <div className="pt-2 border-t border-gray-200">
+                        <span className="text-[10px] text-gray-500 font-bold uppercase">Credit Terms:</span>
+                        <span className="text-xs font-bold text-gray-900 ml-1">
+                          Limit {formatPaise(statementData.customer.credit_limit_paise)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-4 gap-3 bg-gray-100 border border-gray-300 rounded-xl p-4 text-center">
+                    <div className="border-r border-gray-300 pr-2">
+                      <span className="text-[10px] text-gray-600 font-bold uppercase block">Opening Balance</span>
+                      <p className="font-mono text-sm font-bold text-gray-900 mt-1">
+                        {formatPaise(statementData.opening_balance_paise)}
+                      </p>
+                    </div>
+
+                    <div className="border-r border-gray-300 pr-2">
+                      <span className="text-[10px] text-gray-600 font-bold uppercase block">Total Debits (Purchases)</span>
+                      <p className="font-mono text-sm font-bold text-red-600 mt-1">
+                        +{formatPaise(statementData.total_debits_paise)}
+                      </p>
+                    </div>
+
+                    <div className="border-r border-gray-300 pr-2">
+                      <span className="text-[10px] text-gray-600 font-bold uppercase block">Total Credits (Payments)</span>
+                      <p className="font-mono text-sm font-bold text-emerald-700 mt-1">
+                        -{formatPaise(statementData.total_credits_paise)}
+                      </p>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-gray-600 font-bold uppercase block">Closing Balance</span>
+                      <p className="font-mono text-base font-extrabold text-gray-900 mt-1">
+                        {formatPaise(statementData.closing_balance_paise)}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Itemized Ledger Table */}
+                  <div className="border border-gray-300 rounded-xl overflow-hidden">
+                    <table className="w-full text-xs text-left">
                       <thead>
-                        <tr className="border-b border-border-subtle bg-surface-app/40 text-[10px]">
-                          <th className="px-4 py-2.5 text-text-secondary">Date</th>
-                          <th className="px-4 py-2.5 text-text-secondary">Customer</th>
-                          <th className="px-3 py-2.5 text-text-secondary">Method</th>
-                          <th className="px-3 py-2.5 text-text-secondary">Reference</th>
-                          <th className="px-4 py-2.5 text-text-secondary">Remarks</th>
-                          <th className="px-4 py-2.5 text-right text-brand-500 font-semibold">Amount</th>
+                        <tr className="bg-gray-200 border-b border-gray-300 text-gray-800 text-[11px]">
+                          <th className="py-2.5 px-3 font-bold">Date</th>
+                          <th className="py-2.5 px-3 font-bold">Type</th>
+                          <th className="py-2.5 px-3 font-bold">Invoice / Ref #</th>
+                          <th className="py-2.5 px-4 font-bold">Description</th>
+                          <th className="py-2.5 px-3 text-right font-bold text-red-700">Debit (₹)</th>
+                          <th className="py-2.5 px-3 text-right font-bold text-emerald-700">Credit (₹)</th>
+                          <th className="py-2.5 px-3 text-right font-bold text-gray-900">Balance (₹)</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-border-subtle">
-                        {colData.payments.length === 0 ? (
+                      <tbody className="divide-y divide-gray-200 text-gray-900">
+                        {statementData.entries.length === 0 ? (
                           <tr>
-                            <td colSpan={6} className="text-center py-8 text-text-secondary">No payment entries in this period</td>
+                            <td colSpan={7} className="text-center py-10 text-gray-500 italic">
+                              No financial transactions recorded in this period.
+                            </td>
                           </tr>
                         ) : (
-                          colData.payments.map((p: any) => (
-                            <tr key={p.id} className="hover:bg-surface-app/20 transition-colors">
-                              <td className="px-4 py-2 font-mono text-white">{formatDate(p.payment_date)}</td>
-                              <td className="px-4 py-2 text-white">
-                                <div className="font-semibold">{p.customer_name}</div>
-                                <div className="text-[10px] text-text-secondary font-mono">{p.customer_code}</div>
+                          statementData.entries.map((entry) => (
+                            <tr key={entry.id} className="hover:bg-gray-50">
+                              <td className="py-2 px-3 font-mono">{formatDate(entry.entry_date)}</td>
+                              <td className="py-2 px-3 font-semibold text-[10px] uppercase text-gray-700">
+                                {getLedgerRefLabel(entry.ref_type)}
                               </td>
-                              <td className="px-3 py-2 capitalize text-white">{p.method.replace('_', ' ')}</td>
-                              <td className="px-3 py-2 font-mono text-white/90">{p.reference_number || '—'}</td>
-                              <td className="px-4 py-2 text-text-secondary">{p.notes || '—'}</td>
-                              <td className="px-4 py-2 text-right font-mono font-bold text-brand-500">{formatPaise(p.amount_paise)}</td>
+                              <td className="py-2 px-3 font-mono font-bold text-gray-800">
+                                {entry.invoice_number || (entry.ref_id ? `#${entry.ref_id}` : '—')}
+                              </td>
+                              <td className="py-2 px-4 font-medium">{entry.description}</td>
+                              <td className="py-2 px-3 text-right font-mono text-red-600 font-bold">
+                                {entry.debit_paise > 0 ? `+${formatPaise(entry.debit_paise)}` : '—'}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono text-emerald-700 font-bold">
+                                {entry.credit_paise > 0 ? `-${formatPaise(entry.credit_paise)}` : '—'}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono font-extrabold text-gray-900">
+                                {formatPaise(entry.running_balance_paise)}
+                              </td>
                             </tr>
                           ))
                         )}
                       </tbody>
                     </table>
                   </div>
-                </>
-              );
-            })()}
+
+                  {/* Statement Footer & Signoff */}
+                  <div className="pt-8 flex justify-between items-end text-xs text-gray-600">
+                    <div>
+                      <p className="font-semibold text-gray-800">Terms & Payment Instructions:</p>
+                      <p className="text-[10px] text-gray-500 mt-0.5 max-w-sm">
+                        Please settle outstanding balances via UPI, Bank Transfer or Cash at the billing counter.
+                        For billing discrepancies, contact the accounts desk within 7 days of statement receipt.
+                      </p>
+                    </div>
+
+                    <div className="text-center">
+                      <div className="w-48 border-b border-gray-400 mb-1" />
+                      <span className="text-[10px] font-bold text-gray-700 uppercase">Authorized Signatory</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── SECTION C: COLLECTION REPORTS ────────────────────────── */}
+        {activeTab === 'collections' && (
+          <div className="h-full overflow-auto p-6 space-y-6">
+            {/* Filter Toolbar */}
+            <div className="bg-surface-card border border-border-subtle p-5 rounded-2xl flex flex-wrap items-end justify-between gap-4 shadow-sm">
+              <div className="flex flex-wrap items-end gap-4">
+                <div>
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Collection From</label>
+                  <input
+                    type="date"
+                    value={colStart}
+                    onChange={(e) => setColStart(e.target.value)}
+                    className="bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-text-primary font-mono text-xs shadow-sm focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Collection To</label>
+                  <input
+                    type="date"
+                    value={colEnd}
+                    onChange={(e) => setColEnd(e.target.value)}
+                    className="bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-text-primary font-mono text-xs shadow-sm focus:outline-none focus:border-brand-500"
+                  />
+                </div>
+
+                <div className="w-56">
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Customer (Optional)</label>
+                  <CustomerSearch value={colCustomer} onChange={setColCustomer} showBalance={false} />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] text-text-primary font-bold mb-1">Payment Method</label>
+                  <select
+                    value={colMethod}
+                    onChange={(e) => setColMethod(e.target.value)}
+                    className="bg-surface-panel border border-border-subtle rounded-xl px-3 py-2 text-text-primary text-xs shadow-sm focus:outline-none focus:border-brand-500 font-bold"
+                  >
+                    <option value="all">All Methods</option>
+                    <option value="cash">Cash</option>
+                    <option value="upi">UPI</option>
+                    <option value="card">Card</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="cheque">Cheque</option>
+                    <option value="advance_adjustment">Advance Adjustment</option>
+                  </select>
+                </div>
+
+                <button
+                  onClick={() => refetchCol()}
+                  className="px-5 py-2.5 bg-brand-500 hover:bg-brand-400 rounded-xl text-white font-bold text-xs transition-colors shadow-sm flex items-center gap-1.5"
+                >
+                  <Filter size={14} />
+                  <span>Filter Collections</span>
+                </button>
+              </div>
+
+              {/* Actions & Presets */}
+              <div className="flex flex-col items-end gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportCollectionsCSV}
+                    disabled={!collectionReport?.payments?.length}
+                    className="px-3 py-1.5 bg-surface-panel hover:bg-surface-hover border border-border-subtle rounded-xl text-xs font-bold text-text-primary flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-40"
+                  >
+                    <Download size={14} className="text-emerald-500" />
+                    <span>Export CSV</span>
+                  </button>
+                  <button
+                    onClick={() => window.print()}
+                    disabled={!collectionReport?.payments?.length}
+                    className="px-3 py-1.5 bg-brand-500 hover:bg-brand-400 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm disabled:opacity-40"
+                  >
+                    <Printer size={14} />
+                    <span>Print Report</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1">
+                  {[
+                    { id: 'today', label: 'Today' },
+                    { id: 'yesterday', label: 'Yesterday' },
+                    { id: 'last_7', label: 'Last 7 Days' },
+                    { id: 'this_month', label: 'This Month' },
+                  ].map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => handleSetColPreset(p.id as any)}
+                      className="px-2 py-0.5 rounded-md bg-surface-panel hover:bg-surface-hover border border-border-subtle text-[10px] font-medium text-text-secondary hover:text-text-primary"
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Collection Summary KPI Metrics */}
+            {collectionReport && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <div className="col-span-2 bg-surface-card border border-border-subtle rounded-2xl p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-text-secondary font-bold uppercase">Total Collections</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand-500/10 text-brand-600 dark:text-brand-400 font-bold">
+                        {collectionReport.transaction_count} receipts
+                      </span>
+                    </div>
+                    <p className="text-2xl font-extrabold font-mono text-brand-600 dark:text-brand-400 mt-2">
+                      {formatPaise(collectionReport.total_collected_paise)}
+                    </p>
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-border-subtle text-[10px] font-mono text-text-muted">
+                      <span>Allocated: {formatPaise(collectionReport.total_allocated_paise)}</span>
+                      <span>On-Account: {formatPaise(collectionReport.total_unallocated_paise)}</span>
+                    </div>
+                  </div>
+
+                  {Object.entries(collectionReport.by_method).map(([method, data]) => {
+                    const methodLabels: Record<string, string> = {
+                      cash: 'Cash',
+                      upi: 'UPI',
+                      card: 'Card',
+                      bank_transfer: 'Bank Transfer',
+                      cheque: 'Cheque',
+                      advance_adjustment: 'Advance Adj.',
+                    };
+
+                    return (
+                      <div key={method} className="bg-surface-card border border-border-subtle rounded-2xl p-3.5 shadow-sm flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-text-secondary font-bold uppercase">{methodLabels[method] || method}</span>
+                            <span className="text-[9px] font-mono text-text-muted">{data.count}x</span>
+                          </div>
+                          <p className="text-sm font-mono font-extrabold text-text-primary mt-2">
+                            {formatPaise(data.total_paise)}
+                          </p>
+                        </div>
+                        <div className="w-full bg-surface-panel rounded-full h-1.5 overflow-hidden mt-3">
+                          <div
+                            className="h-full bg-brand-500 rounded-full"
+                            style={{
+                              width: `${collectionReport.total_collected_paise > 0 ? (data.total_paise / collectionReport.total_collected_paise) * 100 : 0}%`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Collection Receipts Log Table */}
+                <div className="bg-surface-card border border-border-subtle rounded-2xl overflow-hidden shadow-sm">
+                  <div className="px-5 py-3.5 border-b border-border-subtle flex items-center justify-between bg-surface-panel">
+                    <h3 className="font-extrabold text-text-primary text-xs flex items-center gap-2">
+                      <Layers size={14} className="text-brand-500" />
+                      <span>Payment Collections Log & Bill Allocations</span>
+                    </h3>
+                    <span className="text-[11px] font-mono text-text-secondary">
+                      Showing {collectionReport.payments.length} receipts
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-border-subtle bg-surface-panel text-text-secondary text-[10px] font-bold">
+                          <th className="px-4 py-3">Date</th>
+                          <th className="px-4 py-3">Receipt #</th>
+                          <th className="px-4 py-3">Customer</th>
+                          <th className="px-3 py-3">Method</th>
+                          <th className="px-4 py-3">Reference / Cheque</th>
+                          <th className="px-4 py-3">Collected By</th>
+                          <th className="px-4 py-3">Invoice(s) Allocated Against</th>
+                          <th className="px-4 py-3 text-right">Amount Collected</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border-subtle">
+                        {collectionReport.payments.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="text-center py-12 text-text-secondary">
+                              <BarChart3 size={32} className="mx-auto mb-2 opacity-30" />
+                              <p className="font-semibold">No payment collections found matching the selected criteria.</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          collectionReport.payments.map((p) => (
+                            <tr key={p.id} className="hover:bg-surface-hover transition-colors">
+                              <td className="px-4 py-3 font-mono text-text-primary whitespace-nowrap">
+                                {formatDate(p.payment_date)}
+                              </td>
+
+                              <td className="px-4 py-3 font-mono font-bold text-text-secondary">
+                                #{p.id}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-text-primary">{p.customer_name}</div>
+                                <div className="text-[10px] text-text-secondary font-mono">{p.customer_code}</div>
+                              </td>
+
+                              <td className="px-3 py-3">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-brand-50 dark:bg-brand-500/10 text-brand-700 dark:text-brand-300 border border-brand-300 dark:border-brand-500/30">
+                                  {p.method.replace('_', ' ')}
+                                </span>
+                              </td>
+
+                              <td className="px-4 py-3 font-mono text-text-secondary text-[11px]">
+                                {p.reference_number || p.cheque_number ? (
+                                  <div>
+                                    <span className="font-medium text-text-primary">{p.reference_number || `Chq: ${p.cheque_number}`}</span>
+                                    {p.bank_name && <span className="block text-[10px] text-text-muted">{p.bank_name}</span>}
+                                  </div>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3 text-text-secondary font-medium">
+                                {p.received_by_display}
+                              </td>
+
+                              {/* Invoices Allocated Against */}
+                              <td className="px-4 py-3">
+                                {p.allocations && p.allocations.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {p.allocations.map((a, idx) => (
+                                      <div key={idx} className="flex items-center gap-1.5 text-[11px] font-mono">
+                                        <span className="font-bold text-text-primary">{a.invoice_number}:</span>
+                                        <span className="text-brand-600 dark:text-brand-400">{formatPaise(a.allocated_paise)}</span>
+                                      </div>
+                                    ))}
+                                    {p.unallocated_paise > 0 && (
+                                      <div className="text-[10px] font-mono text-amber-700 dark:text-amber-400 font-bold">
+                                        + On-Account Advance: {formatPaise(p.unallocated_paise)}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/30 text-amber-800 dark:text-amber-300 text-[10px] font-bold font-mono">
+                                    On-Account Deposit ({formatPaise(p.amount_paise)})
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3 text-right font-mono font-extrabold text-sm text-brand-600 dark:text-brand-400">
+                                {formatPaise(p.amount_paise)}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+
+                      {collectionReport.payments.length > 0 && (
+                        <tfoot>
+                          <tr className="bg-surface-panel border-t-2 border-border-subtle font-extrabold text-text-primary">
+                            <td colSpan={7} className="px-4 py-3.5 uppercase tracking-wider text-xs">
+                              TOTAL COLLECTIONS FOR PERIOD
+                            </td>
+                            <td className="px-4 py-3.5 text-right font-mono text-base text-brand-600 dark:text-brand-400">
+                              {formatPaise(collectionReport.total_collected_paise)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-function PrinterIcon({ size }: { size: number }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <polyline points="6 9 6 2 18 2 18 9"></polyline>
-      <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path>
-      <rect x="6" y="14" width="12" height="8"></rect>
-    </svg>
   );
 }

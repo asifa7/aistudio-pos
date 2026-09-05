@@ -1,0 +1,135 @@
+{
+  "env": "development",
+  "dbPath": "E:\\pos\\claude version1\\aug17Aistuiv2\\dev.db",
+  "shopInfo": {
+    "name": "My Premium Meat Shop",
+    "address": "123 Market Square, Bangalore",
+    "phone": "+91 98765 43210",
+    "gstin": "29AAAAA0000A1Z5",
+    "currencySymbol": "₹"
+  },
+  "business": {
+    "logoPath": "",
+    "email": "",
+    "pan": "",
+    "financialYear": "2026-2027"
+  },
+  "invoice": {
+    "numberingMode": "continuous",
+    "prefix": "INV-",
+    "startingNumber": 1,
+    "termsAndConditions": "Goods once sold cannot be returned without receipt.",
+    "copiesCount": 1
+  },
+  "tax": {
+    "gstEnabled": true,
+    "pricingMode": "exclusive",
+    "defaultGstPercent": 5,
+    "taxRounding": "nearest",
+    "rates": [
+      0,
+      5,
+      12,
+      18,
+      28
+    ]
+  },
+  "payments": {
+    "enabledMethods": [
+      "cash",
+      "upi",
+      "card",
+      "split"
+    ],
+    "defaultPaymentMethod": "cash",
+    "allowSplit": true,
+    "allowCredit": true
+  },
+  "cashbox": {
+    "enableShifts": true,
+    "requireOpeningCash": true,
+    "requireClosingCashCount": true,
+    "denominationsEnabled": [
+      500,
+      200,
+      100,
+      50,
+      20,
+      10,
+      5,
+      2,
+      1
+    ],
+    "allowWithdrawal": true,
+    "allowDeposit": true,
+    "allowAdjustment": true,
+    "managerApprovalRequired": false,
+    "discrepancyThresholdPaise": 50000
+  },
+  "inventory": {
+    "trackingEnabled": true,
+    "allowNegativeStock": true,
+    "defaultLowStockThreshold": 5,
+    "alertLowStock": true,
+    "alertOutOfStock": true,
+    "valuationMethod": "FIFO",
+    "batchTracking": true,
+    "expiryTracking": true,
+    "defaultUnit": "kg"
+  },
+  "returns": {
+    "returnsEnabled": true,
+    "returnPeriodDays": 7,
+    "allowPartialReturn": true,
+    "allowExchange": true,
+    "refundToOriginal": true,
+    "cashRefund": true,
+    "storeCredit": true,
+    "requireReturnReason": true,
+    "managerApproval": false,
+    "autoRestock": true
+  },
+  "theme": "dark",
+  "hardware": {
+    "printerName": "",
+    "scalePort": "",
+    "scaleBaudRate": 9600,
+    "barcodeScannerEnabled": true,
+    "cashDrawerEnabled": true
+  },
+  "receiptTemplate": {
+    "paperWidth": "80mm",
+    "headerMessage": "Fresh Quality Meats Daily",
+    "footerMessage": "Thank you for your business! Visit again.",
+    "showGstBreakdown": true,
+    "autoPrintOnComplete": true,
+    "showLogo": true,
+    "showHsn": true,
+    "showDiscount": true,
+    "showCashier": true,
+    "showCustomer": true
+  },
+  "billingSettings": {
+    "skipPaymentConfirmation": false,
+    "enableCalculatorWidget": true,
+    "defaultPaymentMethod": "cash"
+  },
+  "backup": {
+    "backupDir": "E:\\pos\\claude version1\\aug17Aistuiv2\\backups",
+    "autoBackupOnClose": true,
+    "maxBackupsToKeep": 7
+  },
+  "logging": {
+    "level": "INFO",
+    "enableFileLogging": true
+  },
+  "featureFlags": {
+    "enableLoyalty": false,
+    "enableCRM": false,
+    "enableCloudSync": false,
+    "enableRestaurantMode": false,
+    "enableMeatMode": true,
+    "enableManufacturing": false,
+    "enablePharmacy": false
+  }
+}

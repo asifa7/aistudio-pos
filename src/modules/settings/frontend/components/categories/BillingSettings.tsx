@@ -1,5 +1,5 @@
 import React from 'react';
-import { Receipt, Printer, Zap, FileText } from 'lucide-react';
+import { Receipt, Printer, Zap, FileText, Lock } from 'lucide-react';
 import { SettingCard } from '../ui/SettingCard';
 import { SettingRow } from '../ui/SettingRow';
 import { TextField } from '../ui/TextField';
@@ -17,6 +17,31 @@ export const BillingSettings: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      {/* Bill Edit & Delete Authorization Password */}
+      <SettingCard
+        title="Bill Modification & Deletion Security"
+        description="Password required when cashiers attempt to edit or delete completed bills"
+        icon={<Lock size={16} />}
+      >
+        <SettingRow
+          label="Edit / Delete Bill Password"
+          description="Enter a manager/admin password required to reopen or delete bills (default: admin123)"
+        >
+          <TextField
+            type="password"
+            value={inv?.editDeletePassword || ''}
+            onChange={(val) =>
+              updateDraftConfig((prev) => ({
+                ...prev,
+                invoice: { ...(prev.invoice || {}), editDeletePassword: val },
+              }))
+            }
+            placeholder="admin123"
+            className="w-56 font-mono"
+          />
+        </SettingRow>
+      </SettingCard>
+
       {/* Invoice Sequence & Numbering */}
       <SettingCard
         title="Invoice Sequence & Prefixes"

@@ -131,6 +131,16 @@ class ServiceContainer {
     }
     return this._procurementReportsService;
   }
+
+  public get deliveryService() {
+    const { deliveryService } = require('../../modules/delivery/backend/service/delivery_service');
+    return deliveryService;
+  }
+
+  public get addressService() {
+    const { addressService } = require('../../modules/delivery/backend/service/address_service');
+    return addressService;
+  }
 }
 
 export const container = new ServiceContainer();

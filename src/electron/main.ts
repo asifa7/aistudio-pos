@@ -21,6 +21,8 @@ import { backupService } from '../core/backend/backup_service';
 import { receiptService } from '../modules/billing/backend/service/receipt_service';
 import { customerService } from '../modules/customers/backend/service/customer_service';
 import { creditService } from '../modules/customers/backend/service/credit_service';
+import { customerIntelligenceService } from '../modules/customers/backend/service/customer_intelligence_service';
+import { customerUpiService } from '../modules/customers/backend/service/customer_upi_service';
 import { arReportsService } from '../modules/customers/backend/service/ar_reports_service';
 import { supplierService } from '../modules/inventory/backend/service/supplier_service';
 import { procurementService } from '../modules/inventory/backend/service/procurement_service';
@@ -377,7 +379,15 @@ function registerIpcHandlers() {
   });
 
   secureIpcHandle(IPC_CHANNELS.BILLING.REOPEN_INVOICE, (_, args) => {
-    return handleIPCRequest(() => invoiceService.reopenCompletedInvoice(args.invoice_id));
+    return handleIPCRequest(() => invoiceService.reopenCompletedInvoice(args.invoice_id, args.password));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.BILLING.DELETE_INVOICE, (_, args) => {
+    return handleIPCRequest(() => invoiceService.deleteInvoice(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.BILLING.VERIFY_BILL_ACTION_PASSWORD, (_, args: { password: string }) => {
+    return handleIPCRequest(() => invoiceService.verifyActionPassword(args.password));
   });
 
   secureIpcHandle(IPC_CHANNELS.BILLING.COMPLETE_INVOICE, (_, args) => {
@@ -755,8 +765,54 @@ function registerIpcHandlers() {
     }));
   });
 
-  secureIpcHandle(IPC_CHANNELS.INVENTORY.GET_FRIDGE_ACTIVITY_LOG, (_, args?: { branchId?: number; limit?: number }) => {
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.GET_FRIDGE_ACTIVITY_LOG, (_, args?: { branchId?: number; date?: string; limit?: number }) => {
     return handleIPCRequest(() => inventoryService.getFridgeActivityLog(args));
+  });
+
+  // ─── Physical Audit & Consistency Checker Handlers ───
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_CREATE_SESSION, (_, args: any) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.createSession(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_SAVE_COUNTS, (_, args: { sessionId: number; items: any[] }) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.saveCounts(args.sessionId, args.items));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_SUBMIT_SESSION, (_, args: { sessionId: number }) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.submitSession(args.sessionId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_REVIEW_SESSION, (_, args: { sessionId: number }) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.reviewSession(args.sessionId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_APPROVE_SESSION, (_, args: { sessionId: number }) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.approveSession(args.sessionId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_APPLY_SESSION, (_, args: { sessionId: number }) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.applySession(args.sessionId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_GET_SESSION, (_, args: { sessionId: number }) => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.getSession(args.sessionId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.AUDIT_LIST_SESSIONS, () => {
+    const { physicalAuditService } = require('../modules/inventory/backend/service/physical_audit_service');
+    return handleIPCRequest(() => physicalAuditService.listSessions());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.INVENTORY.CHECK_INVENTORY_CONSISTENCY, () => {
+    const { inventoryConsistencyChecker } = require('../modules/inventory/backend/service/inventory_consistency_checker');
+    return handleIPCRequest(() => inventoryConsistencyChecker.runConsistencyCheck());
   });
 
   // ─── Authentication Handlers ───
@@ -787,6 +843,71 @@ function registerIpcHandlers() {
 
   secureIpcHandle(IPC_CHANNELS.REPORTS.GET_PROFIT_SUMMARY, (_, args) => {
     return handleIPCRequest(() => reportsService.getProfitSummary(args.startDate, args.endDate));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.RUN_REPORT, (_, args) => {
+    return handleIPCRequest(() => reportsService.runReport(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.RUN_CUSTOM_REPORT, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.runCustomReport(args, {
+      userId: user?.id,
+      role: user?.role,
+    }));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.BUILD_PIVOT, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.buildPivot(args.options, args.pivotConfig, {
+      userId: user?.id,
+      role: user?.role,
+    }));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.GET_DEFINITIONS, () => {
+    return handleIPCRequest(() => reportsService.getReportDefinitions());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.GET_FILTER_OPTIONS, () => {
+    return handleIPCRequest(() => reportsService.getFilterOptions());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.EXPORT_REPORT, (_, args) => {
+    return handleIPCRequest(() => reportsService.exportReport(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.SAVE_REPORT, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.saveReport({ ...args, createdBy: user?.id || 1 }));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.GET_SAVED_REPORTS, (_, args) => {
+    return handleIPCRequest(() => reportsService.getSavedReports(args?.userId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.TOGGLE_FAVORITE, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.toggleFavorite(args?.userId || user?.id || 1, args.reportId));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.GET_FAVORITES, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.getFavoriteReportIds(args?.userId || user?.id || 1));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.RECORD_RECENT, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.recordRecentReport({ ...args, userId: args?.userId || user?.id || 1 }));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.GET_RECENTS, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => reportsService.getRecentReports(args?.userId || user?.id || 1, args?.limit));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.REPORTS.GET_ALERTS, () => {
+    return handleIPCRequest(() => reportsService.getReportAlerts());
   });
 
   // ─── Products Management Handlers ───
@@ -922,6 +1043,50 @@ function registerIpcHandlers() {
     return handleIPCRequest(() => customerService.getActivityLog(args.customer_id, args.limit));
   });
 
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_PURCHASE_HISTORY, (_, args) => {
+    return handleIPCRequest(() => customerService.getCustomerPurchaseHistory(args.customer_id, args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_OVERVIEW_SUMMARY, (_, args) => {
+    return handleIPCRequest(() => customerService.getCustomerOverviewSummary(args.customer_id));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_INTELLIGENCE, (_, args) => {
+    return handleIPCRequest(() => customerIntelligenceService.getIntelligence(args.customer_id, args.force_refresh));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_TIMELINE, (_, args) => {
+    return handleIPCRequest(() => customerService.getCustomerUnifiedTimeline(args.customer_id, args.limit));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_CRM_ALERTS, () => {
+    return handleIPCRequest(() => customerIntelligenceService.getShopCrmAlertsSummary());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_NEEDING_ATTENTION, (_, args) => {
+    return handleIPCRequest(() => customerIntelligenceService.getCustomersNeedingAttention(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.MATCH_UPI, (_, args) => {
+    return handleIPCRequest(() => customerUpiService.matchUpiPayment(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.CONFIRM_UPI, (_, args) => {
+    return handleIPCRequest(() => customerUpiService.confirmUpiIdentity(args.customer_id, args.vpa, args.payer_name, args.auto_link));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_UPI_IDENTITIES, (_, args) => {
+    return handleIPCRequest(() => customerUpiService.getUpiIdentities(args.customer_id));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.CHECK_DUPLICATES, (_, args) => {
+    return handleIPCRequest(() => customerService.checkDuplicateCustomers(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.MERGE, (_, args) => {
+    return handleIPCRequest(() => customerService.mergeCustomers(args.source_customer_id, args.target_customer_id, { reason: args.reason }));
+  });
+
   // Credit Account
   secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_CREDIT_ACCOUNT, (_, args) => {
     return handleIPCRequest(() => creditService.getCreditAccount(args.customer_id));
@@ -1007,7 +1172,19 @@ function registerIpcHandlers() {
 
   // A/R Reports
   secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_AGING_REPORT, (_, args) => {
-    return handleIPCRequest(() => arReportsService.getAgingReport(args?.asOfDate));
+    return handleIPCRequest(() => arReportsService.getAgingReport(args));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_AGING_SETTINGS, () => {
+    return handleIPCRequest(() => arReportsService.getAgingSettings());
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.UPDATE_AGING_SETTINGS, (_, args) => {
+    return handleIPCRequest(() => arReportsService.updateAgingSettings(args.boundaries));
+  });
+
+  secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_OVERDUE_INVOICES, (_, args) => {
+    return handleIPCRequest(() => arReportsService.getCustomerOverdueInvoices(args.customer_id, args.asOfDate));
   });
 
   secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_OUTSTANDING_REPORT, (_, args) => {
@@ -1015,7 +1192,7 @@ function registerIpcHandlers() {
   });
 
   secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_COLLECTION_REPORT, (_, args) => {
-    return handleIPCRequest(() => arReportsService.getCollectionReport(args.startDate, args.endDate));
+    return handleIPCRequest(() => arReportsService.getCollectionReport(args));
   });
 
   secureIpcHandle(IPC_CHANNELS.CUSTOMERS.GET_ADVANCE_REPORT, () => {
@@ -1333,6 +1510,34 @@ function registerIpcHandlers() {
   secureIpcHandle(IPC_CHANNELS.PAYMENTS_RECEIPTS.REVERSE, (_, args) => handleIPCRequest(() => paymentEngineService.reversePayment(args.payment_receipt_id, args.reason, authService.getCurrentUserId() || 1)));
   secureIpcHandle(IPC_CHANNELS.PAYMENTS_RECEIPTS.GET_BILL_PAYMENT_HISTORY, (_, args) => handleIPCRequest(() => paymentEngineService.getBillPaymentHistory(args.billType, args.billId)));
   secureIpcHandle(IPC_CHANNELS.PAYMENTS_RECEIPTS.GET_OUTSTANDING_BILLS, (_, args) => handleIPCRequest(() => paymentEngineService.getOutstandingPurchaseBills(args || {})));
+
+  // ─── Delivery Module ──────────────────────────────────────────────────────────
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.CREATE, (_, args) => handleIPCRequest(() => container.deliveryService.createDeliveryOrder(args, authService.getCurrentUserId() || 1)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_BY_ID, (_, args) => handleIPCRequest(() => container.deliveryService.getDeliveryById(args.id)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.LIST, (_, args) => handleIPCRequest(() => container.deliveryService.listDeliveries(args || {})));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.UPDATE_STATUS, (_, args) => {
+    const user = authService.getCurrentUser();
+    return handleIPCRequest(() => container.deliveryService.updateDeliveryStatus(args.id, args.status, user?.id || 1, user?.role || 'ADMIN', args.reason, args.notes));
+  });
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.ASSIGN_DRIVER, (_, args) => handleIPCRequest(() => container.deliveryService.assignDriver(args.deliveryId, args.driverId, authService.getCurrentUserId() || 1)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.RECORD_ATTEMPT, (_, args) => handleIPCRequest(() => container.deliveryService.recordDeliveryAttempt(args.deliveryId, args.attempt, authService.getCurrentUserId() || 1)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.VERIFY_OTP, (_, args) => handleIPCRequest(() => container.deliveryService.verifyDeliveryOTP(args.deliveryId, args.otp, authService.getCurrentUserId() || 1)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.RECORD_COD, (_, args) => handleIPCRequest(() => container.deliveryService.recordCODCollection(args.deliveryId, args.collectedPaise, authService.getCurrentUserId() || 1)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.RECONCILE_COD, (_, args) => handleIPCRequest(() => container.deliveryService.reconcileDriverShiftCOD(args.driverId, args.shiftId, authService.getCurrentUserId() || 1, args.notes)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_ACTIVE_MAP, () => handleIPCRequest(() => container.deliveryService.getActiveDeliveriesForMap()));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_STATS, (_, args) => handleIPCRequest(() => container.deliveryService.getDeliveryStats(args?.startDate, args?.endDate)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_EXCEPTIONS, () => handleIPCRequest(() => container.deliveryService.getDeliveryExceptions()));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_DRIVERS, () => handleIPCRequest(() => container.deliveryService.getAllDrivers()));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.CREATE_DRIVER, (_, args) => handleIPCRequest(() => container.deliveryService.createDriver(args)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.UPDATE_DRIVER, (_, args) => handleIPCRequest(() => container.deliveryService.updateDriver(args.id, args.updates)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_ZONES, () => handleIPCRequest(() => container.deliveryService.getAllZones()));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.CREATE_ZONE, (_, args) => handleIPCRequest(() => container.deliveryService.createZone(args)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.UPDATE_ZONE, (_, args) => handleIPCRequest(() => container.deliveryService.updateZone(args.id, args.updates)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.GET_CUSTOMER_ADDRESSES, (_, args) => handleIPCRequest(() => container.addressService.getAddressesByCustomer(args.customerId)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.CREATE_ADDRESS, (_, args) => handleIPCRequest(() => container.addressService.createAddress(args)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.UPDATE_ADDRESS, (_, args) => handleIPCRequest(() => container.addressService.updateAddress(args.id, args.updates)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.DELETE_ADDRESS, (_, args) => handleIPCRequest(() => container.addressService.deleteAddress(args.id)));
+  secureIpcHandle(IPC_CHANNELS.DELIVERY.SET_DEFAULT_ADDRESS, (_, args) => handleIPCRequest(() => container.addressService.setDefaultAddress(args.id)));
 }
 
 

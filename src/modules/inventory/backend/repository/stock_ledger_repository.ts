@@ -69,53 +69,57 @@ export const stockLedgerRepository = {
 
   findAll(): StockStatusRow[] {
     return db.prepare(`
-      SELECT sl.*, pv.variant_name, p.name as product_name, p.product_code, p.category, p.unit_type,
+      SELECT sl.*, pv.variant_name, p.name as product_name, p.product_code, p.category, p.unit_type, p.is_inventory_tracked,
              pv.cost_price_paise_per_unit, pv.current_rate_paise_per_unit, pv.last_purchase_cost, pv.weighted_average_cost,
              (
                SELECT unit_cost_paise 
                FROM product_stock_batches 
-               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               WHERE product_variant_id = pv.id AND status = 'active' 
                ORDER BY received_date DESC, id DESC 
                LIMIT 1
              ) as latest_purchase_rate_paise,
              (
                SELECT unit_cost_paise 
                FROM product_stock_batches 
-               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               WHERE product_variant_id = pv.id AND status = 'active' 
                ORDER BY received_date DESC, id DESC 
                LIMIT 1 OFFSET 1
              ) as previous_purchase_rate_paise
       FROM stock_ledger sl
       JOIN product_variants pv ON sl.product_variant_id = pv.id
       JOIN products p ON pv.product_id = p.id
+      WHERE pv.is_active = 1 AND p.is_active = 1 AND p.is_inventory_tracked = 1
       ORDER BY p.name ASC, pv.variant_name ASC
     `).all() as StockStatusRow[];
   },
 
   getLowStock(): StockStatusRow[] {
     return db.prepare(`
-      SELECT sl.*, pv.variant_name, p.name as product_name, p.product_code, p.category, p.unit_type,
+      SELECT sl.*, pv.variant_name, p.name as product_name, p.product_code, p.category, p.unit_type, p.is_inventory_tracked,
              pv.cost_price_paise_per_unit, pv.current_rate_paise_per_unit, pv.last_purchase_cost, pv.weighted_average_cost,
              (
                SELECT unit_cost_paise 
                FROM product_stock_batches 
-               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               WHERE product_variant_id = pv.id AND status = 'active' 
                ORDER BY received_date DESC, id DESC 
                LIMIT 1
              ) as latest_purchase_rate_paise,
              (
                SELECT unit_cost_paise 
                FROM product_stock_batches 
-               WHERE product_variant_id = pv.id AND source_type = 'purchase' 
+               WHERE product_variant_id = pv.id AND status = 'active' 
                ORDER BY received_date DESC, id DESC 
                LIMIT 1 OFFSET 1
              ) as previous_purchase_rate_paise
       FROM stock_ledger sl
       JOIN product_variants pv ON sl.product_variant_id = pv.id
       JOIN products p ON pv.product_id = p.id
-      WHERE 
-        (p.unit_type = 'weight' AND sl.quantity_grams <= sl.safety_threshold_grams) OR
-        (p.unit_type = 'piece' AND sl.quantity_units <= sl.safety_threshold_units)
+      WHERE pv.is_active = 1 AND p.is_active = 1 AND p.is_inventory_tracked = 1 AND (
+        (p.unit_type = 'weight' AND sl.safety_threshold_grams > 0 AND sl.quantity_grams <= sl.safety_threshold_grams) OR
+        (p.unit_type = 'piece' AND sl.safety_threshold_units > 0 AND sl.quantity_units <= sl.safety_threshold_units) OR
+        (p.unit_type = 'weight' AND (sl.quantity_grams IS NULL OR sl.quantity_grams <= 0)) OR
+        (p.unit_type = 'piece' AND (sl.quantity_units IS NULL OR sl.quantity_units <= 0))
+      )
       ORDER BY p.name ASC, pv.variant_name ASC
     `).all() as StockStatusRow[];
   },
@@ -146,19 +150,26 @@ export const stockLedgerRepository = {
     const itemsWithStatus = all.map(item => {
       const isWeight = item.unit_type === 'weight';
       const current = isWeight ? (item.quantity_grams ?? 0) : (item.quantity_units ?? 0);
-      const threshold = isWeight ? (item.safety_threshold_grams ?? 5000) : (item.safety_threshold_units ?? 10);
-      const ratio = threshold > 0 ? current / threshold : 1;
+      const rawThreshold = isWeight ? item.safety_threshold_grams : item.safety_threshold_units;
+      const hasDefinedThreshold = rawThreshold !== null && rawThreshold !== undefined && rawThreshold > 0;
+      const threshold = hasDefinedThreshold ? rawThreshold! : 0;
 
       let status: 'ok' | 'low' | 'critical' = 'ok';
-      if (ratio <= 0.5) {
+      let reason: string | undefined;
+
+      if (current <= 0) {
         status = 'critical';
         critical++;
-      } else if (ratio <= 1.0) {
-        status = 'low';
-        low++;
+        reason = current < 0 ? 'Negative stock' : 'Out of stock';
+      } else if (hasDefinedThreshold && current <= threshold) {
+        status = current <= (threshold * 0.5) ? 'critical' : 'low';
+        if (status === 'critical') critical++; else low++;
+        reason = 'Below safety threshold';
       } else {
         ok++;
       }
+
+      const ratio = hasDefinedThreshold ? (current / threshold) : (current <= 0 ? 0 : 2);
 
       return {
         ...item,
@@ -166,20 +177,21 @@ export const stockLedgerRepository = {
         thresholdQty: threshold,
         ratio,
         status,
+        attention_reason: reason,
       };
     });
 
     const needsAttention = itemsWithStatus
       .filter(i => i.status !== 'ok')
       .sort((a, b) => a.ratio - b.ratio)
-      .slice(0, 5);
+      .slice(0, 10);
 
     const recentMovements = db.prepare(`
-      SELECT st.*, pv.variant_name, p.name as product_name, p.unit_type
-      FROM stock_transactions st
-      JOIN product_variants pv ON st.product_variant_id = pv.id
+      SELECT il.*, pv.variant_name, p.name as product_name, p.unit_type
+      FROM inventory_ledger il
+      JOIN product_variants pv ON il.product_variant_id = pv.id
       JOIN products p ON pv.product_id = p.id
-      ORDER BY st.created_at DESC
+      ORDER BY il.created_at DESC, il.id DESC
       LIMIT 5
     `).all() as any[];
 
